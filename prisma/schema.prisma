@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model elo_history {
+  id                                Int      @id(map: "pk_elo_history") @default(autoincrement())
+  match_id                          Int
+  user_id                           Int?
+  user1_id                          Int?
+  user2_id                          Int?
+  elo_type                          String   @db.VarChar(6)
+  rating_before                     Int
+  rating_after                      Int
+  rating_change                     Int
+  result                            String   @db.VarChar(4)
+  penalty_result                    Int?     @default(0) @db.SmallInt
+  goal_bonus                        Int?     @default(0)
+  created_at                        DateTime @default(now()) @db.Timestamp(6)
+  trial505                          String?  @db.Char(1)
+  matches                           matches  @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "elo_history_ibfk_1")
+  users_elo_history_user_idTousers  users?   @relation("elo_history_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "elo_history_ibfk_2")
+  users_elo_history_user1_idTousers users?   @relation("elo_history_user1_idTousers", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "elo_history_ibfk_3")
+  users_elo_history_user2_idTousers users?   @relation("elo_history_user2_idTousers", fields: [user2_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "elo_history_ibfk_4")
+
+  @@index([match_id], map: "idx_elo_history_match")
+  @@index([user1_id, user2_id], map: "idx_elo_history_pair")
+  @@index([user_id], map: "idx_elo_history_user")
+  @@index([user_id, elo_type], map: "idx_elo_history_user_type")
+  @@index([elo_type, user_id], map: "idx_elo_type")
+  @@index([user2_id], map: "idx_user2_id")
+}
+
+model match_players {
+  id       Int     @id(map: "pk_match_players") @default(autoincrement())
+  match_id Int
+  user_id  Int
+  team     String  @db.VarChar(1)
+  trial505 String? @db.Char(1)
+  matches  matches @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "match_players_ibfk_1")
+  users    users   @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "match_players_ibfk_2")
+
+  @@index([match_id], map: "idx_match_id")
+  @@index([user_id], map: "idx_user_id")
+}
+
+model matches {
+  id                Int             @id(map: "pk_matches") @default(autoincrement())
+  teama_goals       Int
+  teamb_goals       Int
+  match_type        String          @db.VarChar(3)
+  went_to_penalties Int?            @default(0) @db.SmallInt
+  created_by        Int
+  created_at        DateTime        @default(now()) @db.Timestamp(6)
+  penalty_winner    String?         @db.VarChar(1)
+  trial505          String?         @db.Char(1)
+  elo_history       elo_history[]
+  match_players     match_players[]
+  users             users           @relation(fields: [created_by], references: [id], onUpdate: Restrict, map: "matches_ibfk_1")
+
+  @@index([created_by, match_type], map: "created_by_2")
+  @@index([created_by], map: "idx_created_by")
+}
+
+model pair_elo_ratings {
+  id                                     Int      @id(map: "pk_pair_elo_ratings") @default(autoincrement())
+  user1_id                               Int
+  user2_id                               Int
+  current_rating                         Int?     @default(1200)
+  last_updated                           DateTime @default(now()) @db.Timestamp(6)
+  created_at                             DateTime @default(now()) @db.Timestamp(6)
+  trial505                               String?  @db.Char(1)
+  users_pair_elo_ratings_user1_idTousers users    @relation("pair_elo_ratings_user1_idTousers", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "pair_elo_ratings_ibfk_1")
+  users_pair_elo_ratings_user2_idTousers users    @relation("pair_elo_ratings_user2_idTousers", fields: [user2_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "pair_elo_ratings_ibfk_2")
+
+  @@unique([user1_id, user2_id], map: "unique_pair")
+}
+
+model user_elo_ratings {
+  id             Int      @id(map: "pk_user_elo_ratings") @default(autoincrement())
+  user_id        Int
+  elo_type       String   @db.VarChar(6)
+  current_rating Int?     @default(1200)
+  last_updated   DateTime @default(now()) @db.Timestamp(6)
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+  trial505       String?  @db.Char(1)
+  users          users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "user_elo_ratings_ibfk_1")
+
+  @@unique([user_id, elo_type], map: "unique_user_elo")
+  @@index([elo_type, current_rating], map: "idx_user_elo_ratings_type")
+}
+
+model users {
+  id                                                Int                @id(map: "pk_users") @default(autoincrement())
+  username                                          String             @unique(map: "idx_username") @db.VarChar(50)
+  email                                             String             @unique(map: "idx_email") @db.VarChar(100)
+  password                                          String             @db.VarChar(255)
+  created_at                                        DateTime           @default(now()) @db.Timestamp(6)
+  updated_at                                        DateTime           @default(now()) @db.Timestamp(6)
+  trial505                                          String?            @db.Char(1)
+  elo_history_elo_history_user_idTousers            elo_history[]      @relation("elo_history_user_idTousers")
+  elo_history_elo_history_user1_idTousers           elo_history[]      @relation("elo_history_user1_idTousers")
+  elo_history_elo_history_user2_idTousers           elo_history[]      @relation("elo_history_user2_idTousers")
+  match_players                                     match_players[]
+  matches                                           matches[]
+  pair_elo_ratings_pair_elo_ratings_user1_idTousers pair_elo_ratings[] @relation("pair_elo_ratings_user1_idTousers")
+  pair_elo_ratings_pair_elo_ratings_user2_idTousers pair_elo_ratings[] @relation("pair_elo_ratings_user2_idTousers")
+  user_elo_ratings                                  user_elo_ratings[]
+}
