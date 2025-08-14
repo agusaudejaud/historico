@@ -75,3 +75,27 @@ exports.getHeadToHeadStats = async (req, res) => {
     });
   }
 };
+
+// Agregar este nuevo método al controlador
+exports.getLandingPageStats = async (req, res) => {
+  try {
+    const stats = await Stats.getLandingPageStats();
+    res.json({
+      success: true,
+      data: {
+        topPlayers: stats.topPlayers,
+        totalStats: {
+          players: stats.totalPlayers,
+          matches: stats.totalMatches
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Error al obtener estadísticas de landing:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Error al obtener estadísticas generales",
+      details: err.message 
+    });
+  }
+};

@@ -24,4 +24,6 @@ router.get(
   statsController.getHeadToHeadStats
 );
 
+router.get('/landing', statsController.getLandingPageStats);
+
 module.exports = router;

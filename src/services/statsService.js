@@ -471,6 +471,59 @@ class Stats {
       throw error;
     }
   }
+
+   static async getLandingPageStats() {
+    try {
+      // Top jugadores
+      const topPlayers = await prisma.user_elo_ratings.findMany({
+        where: {
+          elo_type: 'global'
+        },
+        orderBy: {
+          current_rating: 'desc'
+        },
+        take: 10,
+        select: {
+          current_rating: true,
+          users: {
+            select: {
+              username: true,
+              elo_history_elo_history_user_idTousers: {
+                where: {
+                  elo_type: 'global'
+                },
+                select: {
+                  id: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      // Formatear los datos de los jugadores
+      const formattedTopPlayers = topPlayers.map(player => ({
+        username: player.users.username,
+        rating: player.current_rating,
+        matches_played: player.users.elo_history_elo_history_user_idTousers.length
+      }));
+
+      // Estadísticas totales
+      const totalPlayers = await prisma.users.count();
+      const totalMatches = await prisma.matches.count();
+
+      return {
+        topPlayers: formattedTopPlayers,
+        totalPlayers,
+        totalMatches
+      };
+    } catch (error) {
+      throw error;
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
 }
 
 module.exports = Stats;
