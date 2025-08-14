@@ -19,49 +19,36 @@ class ELO {
     try {
       const offset = (page - 1) * limit;
 
-      // Mostrar todos los tipos de ELO disponibles
-      const availableEloTypes = await prisma.user_elo_ratings.groupBy({
-        by: ["elo_type"],
-        _count: {
-          elo_type: true,
+      // Verificar que el tipo de ELO existe en la base de datos
+      const eloTypeExists = await prisma.user_elo_ratings.findFirst({
+        where: {
+          elo_type: eloType,
         },
       });
 
-      // Mapear tipos de ELO del parámetro a los valores del enum EloType en Prisma
-      const eloTypeMapping = {
-        global: "global",
-        "1v1": "v1",
-        "2v2": "v2",
-        
-      };
+      if (!eloTypeExists) {
+        // Mostrar todos los tipos de ELO disponibles para debugging
+        const availableEloTypes = await prisma.user_elo_ratings.groupBy({
+          by: ["elo_type"],
+          _count: {
+            elo_type: true,
+          },
+        });
 
-      const mappedEloType = eloTypeMapping[eloType];
-
-      if (!mappedEloType) {
-        throw new Error(`Tipo de ELO no válido: ${eloType}`);
+        throw new Error(
+          `Tipo de ELO no válido: ${eloType}. Tipos disponibles: ${availableEloTypes
+            .map((t) => t.elo_type)
+            .join(", ")}`
+        );
       }
 
-      // Contar registros con el tipo específico
-      const countByType = await prisma.user_elo_ratings.count({
-        where: {
-          elo_type: mappedEloType,
-        },
-      });
-
       // Contar registros con rating no nulo
-      const countWithRating = await prisma.user_elo_ratings.count({
+      const total = await prisma.user_elo_ratings.count({
         where: {
-          elo_type: mappedEloType,
+          elo_type: eloType,
           current_rating: { not: null },
         },
       });
-
-      // Para elo_history, usar el tipo original (ya que usa VarChar)
-      const historyEloType =
-        eloType === "v1" ? "1v1" : eloType === "v2" ? "2v2" : eloType;
-
-      // Contar total de usuarios con rating en este tipo
-      const total = countWithRating;
 
       if (total === 0) {
         return {
@@ -70,18 +57,13 @@ class ELO {
           page,
           limit,
           elo_type: eloType,
-          debug: {
-            message: `No hay usuarios con rating en el tipo '${mappedEloType}'`,
-            available_types: availableEloTypes,
-            total_records: totalRecords,
-          },
         };
       }
 
       // Obtener datos paginados
       const data = await prisma.user_elo_ratings.findMany({
         where: {
-          elo_type: mappedEloType,
+          elo_type: eloType,
           current_rating: { not: null },
         },
         orderBy: {
@@ -109,21 +91,21 @@ class ELO {
         return map;
       }, {});
 
-      // Formatear datos para mantener compatibilidad
+      // Formatear datos
       const formattedData = await Promise.all(
         data.map(async (item) => {
           // Contar matches y wins para este tipo específico
           const matches = await prisma.elo_history.count({
             where: {
               user_id: item.user_id,
-              elo_type: historyEloType,
+              elo_type: eloType, // Usar directamente el eloType sin mapeo
             },
           });
 
           const wins = await prisma.elo_history.count({
             where: {
               user_id: item.user_id,
-              elo_type: historyEloType,
+              elo_type: eloType, // Usar directamente el eloType sin mapeo
               result: "win",
             },
           });
@@ -250,16 +232,6 @@ class ELO {
     try {
       const offset = (page - 1) * limit;
 
-      // Mapear tipos para compatibilidad con elo_history (que usa varchar)
-      const eloTypeMapping = {
-        global: "global",
-        "1v1": "1v1",
-        "2v2": "2v2",
-        v1: "1v1",
-        v2: "2v2",
-      };
-      const mappedEloType = eloTypeMapping[eloType] || eloType;
-
       // Obtener usuario
       const user = await prisma.users.findUnique({
         where: { username },
@@ -269,11 +241,11 @@ class ELO {
         return { total: 0, page, limit, data: [] };
       }
 
-      // Contar total
+      // Usar directamente el eloType sin mapeo
       const total = await prisma.elo_history.count({
         where: {
           user_id: user.id,
-          elo_type: mappedEloType,
+          elo_type: eloType, // ✅ Sin mapeo
           user2_id: null,
         },
       });
@@ -282,7 +254,7 @@ class ELO {
       const historyData = await prisma.elo_history.findMany({
         where: {
           user_id: user.id,
-          elo_type: mappedEloType,
+          elo_type: eloType, // ✅ Sin mapeo
           user2_id: null,
         },
         include: {
@@ -581,22 +553,19 @@ class ELO {
     }
   }
 
-  // Procesar ELO específico por tipo de match (1v1 o 2v2)
+  // Método processSpecificELO SIN mapeo
   static async processSpecificELO(matchData) {
-    const eloTypeMapping = {
-      "1v1": "v1",
-      "2v2": "v2",
-    };
-    const eloType = eloTypeMapping[matchData.match_type];
+    // ✅ Usar directamente el match_type sin mapeo
+    const eloType = matchData.match_type; // "1v1" o "2v2"
 
-    if (!eloType) return;
+    if (!["1v1", "2v2"].includes(eloType)) return;
 
     const allPlayers = [...matchData.teamA, ...matchData.teamB];
 
     // Obtener ratings actuales para el tipo específico
     const currentRatings = await this.getCurrentRatings(
       allPlayers.map((p) => p.id),
-      eloType
+      eloType // ✅ Sin mapeo
     );
 
     // Calcular rating promedio por equipo
@@ -619,7 +588,7 @@ class ELO {
     for (const player of matchData.teamA) {
       await this.updatePlayerELO(
         player.id,
-        eloType,
+        eloType, // ✅ Sin mapeo
         matchData.id,
         teamARating,
         teamBRating,
@@ -632,7 +601,7 @@ class ELO {
     for (const player of matchData.teamB) {
       await this.updatePlayerELO(
         player.id,
-        eloType,
+        eloType, // ✅ Sin mapeo
         matchData.id,
         teamBRating,
         teamARating,
@@ -796,117 +765,106 @@ class ELO {
     };
   }
 
-  // Actualizar ELO de un jugador
- // Actualizar ELO de un jugador
-static async updatePlayerELO(
-  userId,
-  eloType,
-  matchId,
-  playerTeamRating,
-  opponentTeamRating,
-  actualScore,
-  goalBonus,
-  matchData
-) {
-  try {
-    // Verificar si el registro existe
-    const existingRating = await prisma.user_elo_ratings.findUnique({
-      where: {
-        user_id_elo_type: {
-          user_id: userId,
-          elo_type: eloType,
-        },
-      },
-    });
-
-    let currentRating =
-      existingRating?.current_rating || this.CONFIG.DEFAULT_RATING;
-
-    // Calcular nuevo rating
-    const expectedScore = this.calculateExpectedScore(
-      playerTeamRating,
-      opponentTeamRating
-    );
-    const { newRating, change } = this.calculateNewRating(
-      currentRating,
-      expectedScore,
-      actualScore,
-      goalBonus
-    );
-
-    // Determinar tipo de resultado y penales como entero
-    let resultType;
-    let penaltyResultInt = 0; // 0 por defecto
-
-    if (matchData.went_to_penalties) {
-      resultType = "draw";
-      const playerTeam = matchData.teamA.some((p) => p.id === userId)
-        ? "A"
-        : "B";
-      if (matchData.penalty_winner === playerTeam) {
-        penaltyResultInt = 1; // ganó en penales
-      }
-    } else {
-      if (actualScore === 1) resultType = "win";
-      else if (actualScore === 0) resultType = "loss";
-      else resultType = "draw";
-    }
-
-    // Mapear eloType para el historial
-    const historyEloTypeMapping = {
-      global: "global",
-      v1: "1v1",
-      v2: "2v2",
-      pair: "pair",
-    };
-    const historyEloType = historyEloTypeMapping[eloType] || eloType;
-
-    // Usar transacción para atomicidad
-    await prisma.$transaction(async (tx) => {
-      // Actualizar o crear rating
-      await tx.user_elo_ratings.upsert({
+  // Actualizar rating de jugadores
+  static async updatePlayerELO(
+    userId,
+    eloType,
+    matchId,
+    playerTeamRating,
+    opponentTeamRating,
+    actualScore,
+    goalBonus,
+    matchData
+  ) {
+    try {
+      // Verificar si el registro existe
+      const existingRating = await prisma.user_elo_ratings.findUnique({
         where: {
           user_id_elo_type: {
             user_id: userId,
-            elo_type: eloType,
+            elo_type: eloType, // ✅ Sin mapeo
           },
         },
-        update: {
-          current_rating: newRating,
-          last_updated: new Date(),
-        },
-        create: {
-          user_id: userId,
-          elo_type: eloType,
-          current_rating: newRating,
-          created_at: new Date(),
-          last_updated: new Date(),
-        },
       });
 
-      // Crear registro en historial
-      await tx.elo_history.create({
-        data: {
-          match_id: matchId,
-          user_id: userId,
-          elo_type: historyEloType,
-          rating_before: currentRating,
-          rating_after: newRating,
-          rating_change: change,
-          result: resultType,
-          penalty_result: penaltyResultInt, // ✅ ahora es Int
-          goal_bonus: goalBonus,
-          created_at: new Date(),
-        },
-      });
-    });
+      let currentRating =
+        existingRating?.current_rating || this.CONFIG.DEFAULT_RATING;
 
-    return { userId, newRating, change };
-  } catch (error) {
-    throw error;
+      // Calcular nuevo rating
+      const expectedScore = this.calculateExpectedScore(
+        playerTeamRating,
+        opponentTeamRating
+      );
+      const { newRating, change } = this.calculateNewRating(
+        currentRating,
+        expectedScore,
+        actualScore,
+        goalBonus
+      );
+
+      // Determinar tipo de resultado y penales como entero
+      let resultType;
+      let penaltyResultInt = 0;
+
+      if (matchData.went_to_penalties) {
+        resultType = "draw";
+        const playerTeam = matchData.teamA.some((p) => p.id === userId)
+          ? "A"
+          : "B";
+        if (matchData.penalty_winner === playerTeam) {
+          penaltyResultInt = 1;
+        }
+      } else {
+        if (actualScore === 1) resultType = "win";
+        else if (actualScore === 0) resultType = "loss";
+        else resultType = "draw";
+      }
+
+      // ✅ Usar directamente eloType sin mapeo
+      await prisma.$transaction(async (tx) => {
+        // Actualizar o crear rating
+        await tx.user_elo_ratings.upsert({
+          where: {
+            user_id_elo_type: {
+              user_id: userId,
+              elo_type: eloType, // ✅ Sin mapeo
+            },
+          },
+          update: {
+            current_rating: newRating,
+            last_updated: new Date(),
+          },
+          create: {
+            user_id: userId,
+            elo_type: eloType, // ✅ Sin mapeo
+            current_rating: newRating,
+            created_at: new Date(),
+            last_updated: new Date(),
+          },
+        });
+
+        // Crear registro en historial
+        await tx.elo_history.create({
+          data: {
+            match_id: matchId,
+            user_id: userId,
+            elo_type: eloType, // ✅ Sin mapeo - usar directamente
+            rating_before: currentRating,
+            rating_after: newRating,
+            rating_change: change,
+            result: resultType,
+            penalty_result: penaltyResultInt,
+            goal_bonus: goalBonus,
+            created_at: new Date(),
+          },
+        });
+      });
+
+      return { userId, newRating, change };
+    } catch (error) {
+      throw error;
+    }
   }
-}
-
 
   // Crear par ordenado para parejas
   static createPair(userId1, userId2) {

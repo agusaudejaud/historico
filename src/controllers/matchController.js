@@ -12,7 +12,7 @@ exports.createMatch = async (req, res) => {
     if (!matchData.teamA_players || !matchData.teamB_players) {
       return res.status(400).json({ error: "Faltan jugadores en los equipos" });
     }
-    console.log(matchData);
+  
     // 1. Crear el match
     const matchId = await Match.create(matchData);
 
