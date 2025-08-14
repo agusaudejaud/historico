@@ -245,7 +245,7 @@ class ELO {
       const total = await prisma.elo_history.count({
         where: {
           user_id: user.id,
-          elo_type: eloType, // ✅ Sin mapeo
+          elo_type: eloType,
           user2_id: null,
         },
       });
@@ -254,7 +254,7 @@ class ELO {
       const historyData = await prisma.elo_history.findMany({
         where: {
           user_id: user.id,
-          elo_type: eloType, // ✅ Sin mapeo
+          elo_type: eloType, 
           user2_id: null,
         },
         include: {
