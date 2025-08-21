@@ -21,7 +21,6 @@ model elo_history {
   penalty_result                    Int?     @default(0) @db.SmallInt
   goal_bonus                        Int?     @default(0)
   created_at                        DateTime @default(now()) @db.Timestamp(6)
-  trial505                          String?  @db.Char(1)
   matches                           matches  @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "elo_history_ibfk_1")
   users_elo_history_user_idTousers  users?   @relation("elo_history_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "elo_history_ibfk_2")
   users_elo_history_user1_idTousers users?   @relation("elo_history_user1_idTousers", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "elo_history_ibfk_3")
@@ -40,7 +39,6 @@ model match_players {
   match_id Int
   user_id  Int
   team     String  @db.VarChar(1)
-  trial505 String? @db.Char(1)
   matches  matches @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "match_players_ibfk_1")
   users    users   @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "match_players_ibfk_2")
 
@@ -57,7 +55,6 @@ model matches {
   created_by        Int
   created_at        DateTime        @default(now()) @db.Timestamp(6)
   penalty_winner    String?         @db.VarChar(1)
-  trial505          String?         @db.Char(1)
   elo_history       elo_history[]
   match_players     match_players[]
   users             users           @relation(fields: [created_by], references: [id], onUpdate: Restrict, map: "matches_ibfk_1")
@@ -73,7 +70,6 @@ model pair_elo_ratings {
   current_rating                         Int?     @default(1200)
   last_updated                           DateTime @default(now()) @db.Timestamp(6)
   created_at                             DateTime @default(now()) @db.Timestamp(6)
-  trial505                               String?  @db.Char(1)
   users_pair_elo_ratings_user1_idTousers users    @relation("pair_elo_ratings_user1_idTousers", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "pair_elo_ratings_ibfk_1")
   users_pair_elo_ratings_user2_idTousers users    @relation("pair_elo_ratings_user2_idTousers", fields: [user2_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "pair_elo_ratings_ibfk_2")
 
@@ -87,7 +83,6 @@ model user_elo_ratings {
   current_rating Int?     @default(1200)
   last_updated   DateTime @default(now()) @db.Timestamp(6)
   created_at     DateTime @default(now()) @db.Timestamp(6)
-  trial505       String?  @db.Char(1)
   users          users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "user_elo_ratings_ibfk_1")
 
   @@unique([user_id, elo_type], map: "unique_user_elo")
@@ -101,7 +96,6 @@ model users {
   password                                          String             @db.VarChar(255)
   created_at                                        DateTime           @default(now()) @db.Timestamp(6)
   updated_at                                        DateTime           @default(now()) @db.Timestamp(6)
-  trial505                                          String?            @db.Char(1)
   elo_history_elo_history_user_idTousers            elo_history[]      @relation("elo_history_user_idTousers")
   elo_history_elo_history_user1_idTousers           elo_history[]      @relation("elo_history_user1_idTousers")
   elo_history_elo_history_user2_idTousers           elo_history[]      @relation("elo_history_user2_idTousers")

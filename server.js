@@ -7,6 +7,10 @@ const authRoutes = require("./src/routes/authRoutes");
 const matchRoutes = require("./src/routes/matchRoutes");
 const statsRoutes = require("./src/routes/statsRoutes");
 const eloRoutes = require("./src/routes/eloRoutes");
+const tournamentRoutes = require("./src/routes/tournamentRoutes");
+const leaderboardRoutes = require("./src/routes/leaderboardRoutes");
+
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,6 +42,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/", matchRoutes);
 app.use("/api/", statsRoutes);
 app.use("/api/ranking", eloRoutes);
+app.use("/api/leaderboard", leaderboardRoutes);
+app.use("/api/tournament", tournamentRoutes);
+
 // Ruta de prueba
 app.get("/", (req, res) => {
   res.json({ message: "API funcionando correctamente" });

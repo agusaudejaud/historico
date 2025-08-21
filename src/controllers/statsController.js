@@ -46,35 +46,7 @@ exports.getStatsForPair2v2 = async (req, res) => {
   }
 };
 
-// Estadísticas cara a cara entre dos usuarios
-exports.getHeadToHeadStats = async (req, res) => {
-  const username1 = req.params.username1;
-  const username2 = req.params.username2;
 
-  if (!username1 || !username2 || username1 === username2) {
-    return res.status(400).json({ 
-      error: "Se requieren dos usernames diferentes" 
-    });
-  }
-
-  try {
-    const result = await Stats.getHeadToHeadStats(username1, username2);
-
-    res.json({
-      enfrentamiento: `${result.player1.username} vs ${result.player2.username}`,
-      estadisticas: result.stats
-    });
-  } catch (err) {
-    console.error("Error al obtener estadísticas cara a cara:", err);
-    if (err.message === "Uno o ambos usuarios no encontrados") {
-      return res.status(404).json({ error: err.message });
-    }
-    res.status(500).json({ 
-      error: "Error interno al obtener estadísticas cara a cara", 
-      details: err.message 
-    });
-  }
-};
 
 // Agregar este nuevo método al controlador
 exports.getLandingPageStats = async (req, res) => {

@@ -2,78 +2,85 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 class Match {
- static async create(data) {
-  let {
-    teamA_players,
-    teamB_players,
-    teamA_goals,
-    teamB_goals,
-    match_type,
-    went_to_penalties,
-    penalty_winner,
-    created_by,
-  } = data;
+  static async create(data) {
+    let {
+      teamA_players,
+      teamB_players,
+      teamA_goals,
+      teamB_goals,
+      match_type,
+      went_to_penalties,
+      penalty_winner,
+      created_by,
+    } = data;
 
-  // Mapear a los nombres que espera la DB
-  const teama_goals = teamA_goals;
-  const teamb_goals = teamB_goals;
+    // Mapear a los nombres que espera la DB
+    const teama_goals = teamA_goals;
+    const teamb_goals = teamB_goals;
 
-  // Validación según tipo
-  if (match_type === "1v1") {
-    if (teamA_players.length !== 1 || teamB_players.length !== 1) {
-      throw new Error("1v1 matches must have exactly 1 player per team");
+    // Validación según tipo
+    if (match_type === "1v1") {
+      if (teamA_players.length !== 1 || teamB_players.length !== 1) {
+        throw new Error("1v1 matches must have exactly 1 player per team");
+      }
+    } else if (match_type === "2v2") {
+      if (teamA_players.length !== 2 || teamB_players.length !== 2) {
+        throw new Error("2v2 matches must have exactly 2 players per team");
+      }
     }
-  } else if (match_type === "2v2") {
-    if (teamA_players.length !== 2 || teamB_players.length !== 2) {
-      throw new Error("2v2 matches must have exactly 2 players per team");
-    }
-  }
 
-  // Ajustar penales
-  if (teama_goals !== teamb_goals) {
-    went_to_penalties = 0;
-    penalty_winner = null;
-  } else {
-    went_to_penalties = went_to_penalties ? 1 : 0;
-    if (went_to_penalties && !["A", "B"].includes(penalty_winner)) {
-      throw new Error('Si hay penales, penalty_winner debe ser "A" o "B"');
-    }
-    if (!went_to_penalties) {
+    // Ajustar penales
+    if (teama_goals !== teamb_goals) {
+      went_to_penalties = 0;
       penalty_winner = null;
+    } else {
+      went_to_penalties = went_to_penalties ? 1 : 0;
+      if (went_to_penalties && !["A", "B"].includes(penalty_winner)) {
+        throw new Error('Si hay penales, penalty_winner debe ser "A" o "B"');
+      }
+      if (!went_to_penalties) {
+        penalty_winner = null;
+      }
     }
-  }
 
-  try {
-    const result = await prisma.$transaction(async (tx) => {
-      // Crear match
-      const match = await tx.matches.create({
-        data: {
-          teama_goals,
-          teamb_goals,
-          match_type,
-          went_to_penalties,
-          penalty_winner,
-          created_by,
-          created_at: new Date(),
-        },
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        // Crear match
+        const match = await tx.matches.create({
+          data: {
+            teama_goals,
+            teamb_goals,
+            match_type,
+            went_to_penalties,
+            penalty_winner,
+            created_by,
+            created_at: new Date(),
+          },
+        });
+
+        // Crear jugadores
+        const matchPlayers = [
+          ...teamA_players.map((userId) => ({
+            match_id: match.id,
+            user_id: userId,
+            team: "A",
+          })),
+          ...teamB_players.map((userId) => ({
+            match_id: match.id,
+            user_id: userId,
+            team: "B",
+          })),
+        ];
+
+        await tx.match_players.createMany({ data: matchPlayers });
+        return match.id;
       });
 
-      // Crear jugadores
-      const matchPlayers = [
-        ...teamA_players.map((userId) => ({ match_id: match.id, user_id: userId, team: "A" })),
-        ...teamB_players.map((userId) => ({ match_id: match.id, user_id: userId, team: "B" })),
-      ];
-
-      await tx.match_players.createMany({ data: matchPlayers });
-      return match.id;
-    });
-
-    return result;
-  } catch (error) {
-    throw error;
+      return result;
+    } catch (error) {
+      throw error;
+    }
   }
-}
-
 
   // Get all matches with pagination
   static async getAll({ page = 1, limit = 20, match_type } = {}) {
@@ -220,7 +227,7 @@ class Match {
         where: whereConditions,
         include: {
           users: {
-            // FIX: Cambiar de 'createdBy' a 'users' según tu schema
+            
             select: {
               username: true,
             },
@@ -228,7 +235,7 @@ class Match {
           match_players: {
             include: {
               users: {
-                // FIX: Cambiar de 'user' a 'users' según tu schema
+               
                 select: {
                   id: true,
                   username: true,
@@ -299,13 +306,13 @@ class Match {
 
         return {
           match_id: match.id,
-          created_by: match.users.username, // FIX: Cambiar de match.createdBy a match.users
+          created_by: match.users.username,
           created_at: match.created_at,
-          match_type: match.match_type, // FIX: No convertir, usar el valor directo
+          match_type: match.match_type,
           went_to_penalties: match.went_to_penalties,
           penalty_winner: match.penalty_winner,
           result: {
-            teamA_goals: match.teama_goals, // FIX: Nombres correctos del schema
+            teamA_goals: match.teama_goals,
             teamB_goals: match.teamb_goals,
             winner,
           },

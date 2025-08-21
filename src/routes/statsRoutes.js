@@ -17,12 +17,7 @@ router.get(
   statsController.getStatsByUser
 );
 
-// GET estadísticas cara a cara entre dos usuarios
-router.get(
-  "/head/:username1/:username2",
-  authenticateToken,
-  statsController.getHeadToHeadStats
-);
+
 
 router.get('/landing', statsController.getLandingPageStats);
 
