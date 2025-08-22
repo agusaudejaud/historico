@@ -1106,12 +1106,18 @@ static async getSmartLeaderboard(limit = 50, eloType = "global", page = 1) {
       playersWithRecentActivity.map(async ({ player, recentMetrics }) => {
         try {
           // 📈 Fórmula de puntaje inteligente
-          const smart_score =
-            player.current_rating * 0.6 + // HABILIDAD
-            recentMetrics.consistency * 1.8 + // CONSISTENCIA
-            recentMetrics.winrate * 0.6 + // PERFORMANCE
-            recentMetrics.activity_score * 0.4; // DEDICACIÓN
+         const weights = {
+              rating: 0.35,
+              consistency: 0.2,
+              winrate: 0.35,
+              activity: 0.1,
+            };
 
+            const smart_score =
+              player.current_rating * weights.rating +
+              recentMetrics.consistency * weights.consistency +
+              recentMetrics.winrate * weights.winrate +
+              recentMetrics.activity_score * weights.activity;
           return {
             ...player,
             recent_metrics: recentMetrics,
@@ -1332,11 +1338,18 @@ static async getSmartPairLeaderboard(limit = 50, page = 1) {
       pairsWithRecentActivity.map(async ({ pair, recentMetrics }) => {
         try {
           // 📈 Fórmula de puntaje inteligente para parejas
-          const smart_score =
-            pair.current_rating * 0.6 + // HABILIDAD
-            recentMetrics.consistency * 0.6 + // CONSISTENCIA
-            recentMetrics.winrate * 1.8 + // PERFORMANCE
-            recentMetrics.activity_score * 0.4; // DEDICACIÓN
+          const weights = {
+              rating: 0.35,
+              consistency: 0.2,
+              winrate: 0.35,
+              activity: 0.1,
+            };
+
+            const smart_score =
+              pair.current_rating * weights.rating +
+              recentMetrics.consistency * weights.consistency +
+              recentMetrics.winrate * weights.winrate +
+              recentMetrics.activity_score * weights.activity;
 
           return {
             ...pair,
