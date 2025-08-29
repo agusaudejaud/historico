@@ -10,8 +10,6 @@ const eloRoutes = require("./src/routes/eloRoutes");
 const tournamentRoutes = require("./src/routes/tournamentRoutes");
 const leaderboardRoutes = require("./src/routes/leaderboardRoutes");
 
-
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 

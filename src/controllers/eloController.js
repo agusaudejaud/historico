@@ -1,34 +1,33 @@
-const ELO = require('../services/eloService');
-
+const ELO = require("../services/eloService");
 
 // Obtener leaderboard global (modificado para paginación)
 exports.getGlobalLeaderboard = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const page = parseInt(req.query.page) || 1;
-    const eloType = req.query.type || 'global';
+    const eloType = req.query.type || "global";
 
-    if (!['global', '1v1', '2v2'].includes(eloType)) {
+    if (!["global", "1v1", "2v2"].includes(eloType)) {
       return res.status(400).json({
-        error: 'Tipo de ELO inválido. Usa: global, 1v1, o 2v2'
+        error: "Tipo de ELO inválido. Usa: global, 1v1, o 2v2",
       });
     }
 
     const leaderboard = await ELO.getGlobalLeaderboard(limit, eloType, page);
-    
+
     res.json({
       success: true,
       data: leaderboard.data,
       total: leaderboard.total,
       page,
       limit,
-      type: eloType
+      type: eloType,
     });
   } catch (error) {
-    console.error('Error getting global leaderboard:', error);
+    console.error("Error getting global leaderboard:", error);
     res.status(500).json({
-      error: 'Error al obtener el ranking global',
-      details: error.message
+      error: "Error al obtener el ranking global",
+      details: error.message,
     });
   }
 };
@@ -38,22 +37,22 @@ exports.getPairLeaderboard = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const page = parseInt(req.query.page) || 1;
-    
+
     const leaderboard = await ELO.getPairLeaderboard(limit, page);
-    
+
     res.json({
       success: true,
       data: leaderboard.data,
       total: leaderboard.total,
       page,
       limit,
-      type: 'pairs'
+      type: "pairs",
     });
   } catch (error) {
-    console.error('Error getting pair leaderboard:', error);
+    console.error("Error getting pair leaderboard:", error);
     res.status(500).json({
-      error: 'Error al obtener el ranking de parejas',
-      details: error.message
+      error: "Error al obtener el ranking de parejas",
+      details: error.message,
     });
   }
 };
@@ -64,26 +63,25 @@ exports.getELOHistory = async (req, res) => {
     const { username } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
-    const eloType = req.query.type || 'global';
+    const eloType = req.query.type || "global";
 
-    if (!['global', '1v1', '2v2'].includes(eloType)) {
+    if (!["global", "1v1", "2v2"].includes(eloType)) {
       return res.status(400).json({
-        error: 'Tipo de ELO inválido. Usa: global, 1v1, o 2v2'
+        error: "Tipo de ELO inválido. Usa: global, 1v1, o 2v2",
       });
     }
 
     const history = await ELO.getELOHistory(username, eloType, { page, limit });
-    
+
     res.json({
       success: true,
       ...history,
-      
     });
   } catch (error) {
-    console.error('Error getting ELO history:', error);
+    console.error("Error getting ELO history:", error);
     res.status(500).json({
-      error: 'Error al obtener el historial de ELO',
-      details: error.message
+      error: "Error al obtener el historial de ELO",
+      details: error.message,
     });
   }
 };
@@ -99,40 +97,38 @@ exports.getPairELOHistory = async (req, res) => {
     if (!username1 || !username2) {
       return res.status(400).json({
         success: false,
-        error: 'Se requieren dos nombres de usuario'
+        error: "Se requieren dos nombres de usuario",
       });
     }
 
     if (username1 === username2) {
       return res.status(400).json({
         success: false,
-        error: 'Los nombres de usuario deben ser diferentes'
+        error: "Los nombres de usuario deben ser diferentes",
       });
     }
 
-    const history = await ELO.getPairELOHistory(username1, username2, { 
-      page, 
-      limit 
+    const history = await ELO.getPairELOHistory(username1, username2, {
+      page,
+      limit,
     });
 
     // Respuesta mejorada
     res.json({
       success: true,
-      
-      ...history
+
+      ...history,
     });
   } catch (error) {
-    console.error('Error getting pair ELO history:', error);
+    console.error("Error getting pair ELO history:", error);
     res.status(500).json({
       success: false,
-      error: 'Error al obtener el historial de ELO de la pareja',
+      error: "Error al obtener el historial de ELO de la pareja",
       details: error.message,
-      suggestion: 'Verifica que ambos usuarios existan y hayan jugado juntos'
+      suggestion: "Verifica que ambos usuarios existan y hayan jugado juntos",
     });
   }
 };
-
-
 
 /* Recalcular ELO completo (función de admin)
 exports.recalculateELO = async (req, res) => {
@@ -183,26 +179,3 @@ exports.processMatch = async (req, res) => {
     });
   }
 }; */
-
-// En eloController.js, añade este nuevo método
-exports.getLandingStats = async (req, res) => {
-  try {
-    const stats = await ELO.getLandingPageStats();
-    
-    res.json({
-      success: true,
-      data: {
-        topPlayers: stats.topPlayers,
-        totalPlayers: stats.totalPlayers,
-        totalMatches: stats.totalMatches
-      }
-    });
-  } catch (error) {
-    console.error('Error getting landing page stats:', error);
-    res.status(500).json({
-      error: 'Error al obtener estadísticas para la landing page',
-      details: error.message
-    });
-  }
-};
-

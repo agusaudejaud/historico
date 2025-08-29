@@ -11,7 +11,8 @@ router.get("/teams", authenticateToken, eloController.getPairLeaderboard);
 // Rutas públicas - Historiales
 router.get(
   "/history/:username",
-  authenticateToken, authenticateToken,
+  authenticateToken,
+  authenticateToken,
   eloController.getELOHistory
 );
 router.get(
@@ -20,6 +21,4 @@ router.get(
   eloController.getPairELOHistory
 );
 
-
-router.get("/landing", eloController.getLandingStats);
 module.exports = router;

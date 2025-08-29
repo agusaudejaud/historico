@@ -291,8 +291,6 @@ class Stats {
     }
   }
 
-
-
   static async getLandingPageStats() {
     try {
       // Top jugadores
@@ -343,6 +341,512 @@ class Stats {
       throw error;
     } finally {
       await prisma.$disconnect();
+    }
+  }
+
+  // Head-to-head 1v1 entre dos usuarios
+  static async getHeadToHead1v1(username1, username2) {
+    try {
+      // 1. Verificar que los usuarios existan
+      const users = await prisma.users.findMany({
+        where: {
+          OR: [
+            { username: { equals: username1, mode: "insensitive" } },
+            { username: { equals: username2, mode: "insensitive" } },
+          ],
+        },
+      });
+
+      if (users.length !== 2) {
+        throw new Error("Uno o ambos usuarios no encontrados");
+      }
+
+      const user1 = users.find(
+        (u) => u.username.toLowerCase() === username1.toLowerCase()
+      );
+      const user2 = users.find(
+        (u) => u.username.toLowerCase() === username2.toLowerCase()
+      );
+
+      if (!user1 || !user2) {
+        throw new Error("Error al encontrar los usuarios");
+      }
+
+      const player1Id = user1.id;
+      const player2Id = user2.id;
+
+      // 2. Buscar partidos 1v1 entre estos usuarios
+      const matchesRaw = await prisma.$queryRaw`
+        SELECT 
+          m.id,
+          m.teama_goals,
+          m.teamb_goals,
+          m.went_to_penalties,
+          m.penalty_winner,
+          m.created_at,
+          mp1.team as player1_team,
+          mp2.team as player2_team
+        FROM matches m
+        JOIN match_players mp1 ON m.id = mp1.match_id AND mp1.user_id = ${player1Id}
+        JOIN match_players mp2 ON m.id = mp2.match_id AND mp2.user_id = ${player2Id}
+        WHERE m.match_type = '1v1' 
+          AND mp1.team != mp2.team
+        ORDER BY m.created_at DESC
+      `;
+
+      // 3. Calcular estadísticas para jugador1
+      const statsPlayer1 = {
+        partidos_jugados: matchesRaw.length,
+        partidos_ganados: 0,
+        partidos_perdidos: 0,
+        partidos_empatados: 0,
+        ganados_por_penales: 0,
+        perdidos_por_penales: 0,
+        goles_a_favor: 0,
+        goles_en_contra: 0,
+        diferencia_goles: 0,
+        winrate: 0,
+        winrate_with_penalties: 0,
+      };
+
+      // 4. Obtener ELO ratings individuales de ambos jugadores
+      const eloPlayer1 = await prisma.user_elo_ratings.findFirst({
+        where: {
+          user_id: player1Id,
+          elo_type: "1v1",
+        },
+      });
+
+      const eloPlayer2 = await prisma.user_elo_ratings.findFirst({
+        where: {
+          user_id: player2Id,
+          elo_type: "1v1",
+        },
+      });
+
+      // 5. Obtener últimos 5 partidos para cada jugador
+      const last5MatchesPlayer1 = await prisma.$queryRaw`
+      SELECT 
+        m.id,
+        m.teama_goals,
+        m.teamb_goals,
+        m.went_to_penalties,
+        m.penalty_winner,
+        mp.team,
+        CASE 
+          WHEN (mp.team = 'A' AND m.teama_goals > m.teamb_goals) OR 
+               (mp.team = 'B' AND m.teamb_goals > m.teama_goals) THEN 'G'
+          WHEN (mp.team = 'A' AND m.teama_goals < m.teamb_goals) OR 
+               (mp.team = 'B' AND m.teamb_goals < m.teama_goals) THEN 'P'
+          WHEN m.went_to_penalties = 1 THEN 'E'
+          ELSE 'E'
+        END as resultado
+      FROM matches m
+      JOIN match_players mp ON m.id = mp.match_id
+      WHERE mp.user_id = ${player1Id} AND m.match_type = '1v1'
+      ORDER BY m.created_at DESC
+      LIMIT 5
+    `;
+
+      const last5MatchesPlayer2 = await prisma.$queryRaw`
+      SELECT 
+        m.id,
+        m.teama_goals,
+        m.teamb_goals,
+        m.went_to_penalties,
+        m.penalty_winner,
+        mp.team,
+        CASE 
+          WHEN (mp.team = 'A' AND m.teama_goals > m.teamb_goals) OR 
+               (mp.team = 'B' AND m.teamb_goals > m.teama_goals) THEN 'G'
+          WHEN (mp.team = 'A' AND m.teama_goals < m.teamb_goals) OR 
+               (mp.team = 'B' AND m.teamb_goals < m.teama_goals) THEN 'P'
+          WHEN m.went_to_penalties = 1 THEN 'E'
+          ELSE 'E'
+        END as resultado
+      FROM matches m
+      JOIN match_players mp ON m.id = mp.match_id
+      WHERE mp.user_id = ${player2Id} AND m.match_type = '1v1'
+      ORDER BY m.created_at DESC
+      LIMIT 5
+    `;
+      // Inicializar stats para jugador2 (será opuesto al jugador1)
+      const statsPlayer2 = {
+        partidos_jugados: matchesRaw.length,
+        partidos_ganados: 0,
+        partidos_perdidos: 0,
+        partidos_empatados: 0,
+        ganados_por_penales: 0,
+        perdidos_por_penales: 0,
+        goles_a_favor: 0,
+        goles_en_contra: 0,
+        diferencia_goles: 0,
+        winrate: 0,
+        winrate_with_penalties: 0,
+      };
+
+      matchesRaw.forEach((match) => {
+        const player1Team = match.player1_team;
+        const player2Team = match.player2_team;
+
+        // Goles para jugador1
+        const gf1 =
+          player1Team === "A"
+            ? Number(match.teama_goals)
+            : Number(match.teamb_goals);
+        const gc1 =
+          player1Team === "A"
+            ? Number(match.teamb_goals)
+            : Number(match.teama_goals);
+
+        // Goles para jugador2
+        const gf2 =
+          player2Team === "A"
+            ? Number(match.teama_goals)
+            : Number(match.teamb_goals);
+        const gc2 =
+          player2Team === "A"
+            ? Number(match.teamb_goals)
+            : Number(match.teama_goals);
+
+        // Actualizar stats jugador1
+        statsPlayer1.goles_a_favor += gf1;
+        statsPlayer1.goles_en_contra += gc1;
+
+        // Actualizar stats jugador2
+        statsPlayer2.goles_a_favor += gf2;
+        statsPlayer2.goles_en_contra += gc2;
+
+        if (gf1 > gc1) {
+          // Jugador1 gana
+          statsPlayer1.partidos_ganados++;
+          statsPlayer2.partidos_perdidos++;
+        } else if (gf1 < gc1) {
+          // Jugador2 gana
+          statsPlayer1.partidos_perdidos++;
+          statsPlayer2.partidos_ganados++;
+        } else {
+          // Empate
+          statsPlayer1.partidos_empatados++;
+          statsPlayer2.partidos_empatados++;
+
+          if (match.went_to_penalties) {
+            if (match.penalty_winner === player1Team) {
+              statsPlayer1.ganados_por_penales++;
+              statsPlayer2.perdidos_por_penales++;
+            } else {
+              statsPlayer1.perdidos_por_penales++;
+              statsPlayer2.ganados_por_penales++;
+            }
+          }
+        }
+      });
+
+      // Calcular estadísticas finales para ambos jugadores
+      [statsPlayer1, statsPlayer2].forEach((stats) => {
+        stats.diferencia_goles = stats.goles_a_favor - stats.goles_en_contra;
+
+        if (stats.partidos_jugados > 0) {
+          stats.winrate = Number(
+            ((stats.partidos_ganados / stats.partidos_jugados) * 100).toFixed(2)
+          );
+          stats.winrate_with_penalties = Number(
+            (
+              ((stats.partidos_ganados + stats.ganados_por_penales) /
+                stats.partidos_jugados) *
+              100
+            ).toFixed(2)
+          );
+        }
+      });
+
+      return {
+        jugador1: {
+          id: player1Id,
+          username: user1.username,
+          elo: eloPlayer1?.current_rating || 1200,
+          ultimos_5_partidos: last5MatchesPlayer1.map(
+            (match) => match.resultado
+          ),
+          estadisticas: statsPlayer1,
+        },
+        jugador2: {
+          id: player2Id,
+          username: user2.username,
+          elo: eloPlayer2?.current_rating || 1200,
+          ultimos_5_partidos: last5MatchesPlayer2.map(
+            (match) => match.resultado
+          ),
+          estadisticas: statsPlayer2,
+        },
+      };
+    } catch (error) {
+      console.error("Error en getHeadToHead1v1:", error);
+      throw error;
+    }
+  }
+
+  // Head-to-head 2v2 entre dos parejas
+  static async getHeadToHead2v2(username1, username2, username3, username4) {
+    try {
+      // 1. Verificar que los 4 usuarios existan y sean únicos
+      const usernames = [username1, username2, username3, username4];
+      const uniqueUsernames = [
+        ...new Set(usernames.map((u) => u.toLowerCase())),
+      ];
+
+      if (uniqueUsernames.length !== 4) {
+        throw new Error("Los 4 usuarios deben ser únicos");
+      }
+
+      const users = await prisma.users.findMany({
+        where: {
+          OR: usernames.map((username) => ({
+            username: { equals: username, mode: "insensitive" },
+          })),
+        },
+      });
+
+      if (users.length !== 4) {
+        throw new Error("Uno o más usuarios no encontrados");
+      }
+
+      // Mapear usuarios
+      const userMap = {};
+      users.forEach((user) => {
+        userMap[user.username.toLowerCase()] = user;
+      });
+
+      const user1 = userMap[username1.toLowerCase()];
+      const user2 = userMap[username2.toLowerCase()];
+      const user3 = userMap[username3.toLowerCase()];
+      const user4 = userMap[username4.toLowerCase()];
+
+      if (!user1 || !user2 || !user3 || !user4) {
+        throw new Error("Error al mapear usuarios");
+      }
+
+      // 2. Buscar partidos donde estén las dos parejas enfrentadas
+      const matchesRaw = await prisma.$queryRaw`
+        SELECT 
+          m.id,
+          m.teama_goals,
+          m.teamb_goals,
+          m.went_to_penalties,
+          m.penalty_winner,
+          m.created_at,
+          mp1.team as user1_team,
+          mp2.team as user2_team,
+          mp3.team as user3_team,
+          mp4.team as user4_team
+        FROM matches m
+        JOIN match_players mp1 ON m.id = mp1.match_id AND mp1.user_id = ${user1.id}
+        JOIN match_players mp2 ON m.id = mp2.match_id AND mp2.user_id = ${user2.id}
+        JOIN match_players mp3 ON m.id = mp3.match_id AND mp3.user_id = ${user3.id}
+        JOIN match_players mp4 ON m.id = mp4.match_id AND mp4.user_id = ${user4.id}
+        WHERE m.match_type = '2v2'
+          AND mp1.team = mp2.team
+          AND mp3.team = mp4.team
+          AND mp1.team != mp3.team
+        ORDER BY m.created_at DESC
+      `;
+
+      // 3. Calcular estadísticas
+      const statsPair1 = {
+        partidos_jugados: matchesRaw.length,
+        partidos_ganados: 0,
+        partidos_perdidos: 0,
+        partidos_empatados: 0,
+        ganados_por_penales: 0,
+        perdidos_por_penales: 0,
+        goles_a_favor: 0,
+        goles_en_contra: 0,
+        diferencia_goles: 0,
+        winrate: 0,
+        winrate_with_penalties: 0,
+      };
+
+      const statsPair2 = {
+        partidos_jugados: matchesRaw.length,
+        partidos_ganados: 0,
+        partidos_perdidos: 0,
+        partidos_empatados: 0,
+        ganados_por_penales: 0,
+        perdidos_por_penales: 0,
+        goles_a_favor: 0,
+        goles_en_contra: 0,
+        diferencia_goles: 0,
+        winrate: 0,
+        winrate_with_penalties: 0,
+      };
+
+      // 4. Obtener ELO de las parejas
+      const pair1Elo = await prisma.pair_elo_ratings.findFirst({
+        where: {
+          OR: [
+            { user1_id: user1.id, user2_id: user2.id },
+            { user1_id: user2.id, user2_id: user1.id },
+          ],
+        },
+      });
+
+      const pair2Elo = await prisma.pair_elo_ratings.findFirst({
+        where: {
+          OR: [
+            { user1_id: user3.id, user2_id: user4.id },
+            { user1_id: user4.id, user2_id: user3.id },
+          ],
+        },
+      });
+
+      // 5. Obtener últimos 5 partidos para cada pareja
+      const last5MatchesPair1 = await prisma.$queryRaw`
+      SELECT 
+        m.id,
+        m.teama_goals,
+        m.teamb_goals,
+        m.went_to_penalties,
+        m.penalty_winner,
+        mp1.team,
+        CASE 
+          WHEN (mp1.team = 'A' AND m.teama_goals > m.teamb_goals) OR 
+               (mp1.team = 'B' AND m.teamb_goals > m.teama_goals) THEN 'G'
+          WHEN (mp1.team = 'A' AND m.teama_goals < m.teamb_goals) OR 
+               (mp1.team = 'B' AND m.teamb_goals < m.teama_goals) THEN 'P'
+          WHEN m.went_to_penalties = 1 THEN 'E'
+          ELSE 'E'
+        END as resultado
+      FROM matches m
+      JOIN match_players mp1 ON m.id = mp1.match_id
+      JOIN match_players mp2 ON m.id = mp2.match_id
+      WHERE mp1.user_id = ${user1.id} 
+        AND mp2.user_id = ${user2.id}
+        AND mp1.team = mp2.team
+        AND m.match_type = '2v2'
+      ORDER BY m.created_at DESC
+      LIMIT 5
+    `;
+
+      const last5MatchesPair2 = await prisma.$queryRaw`
+      SELECT 
+        m.id,
+        m.teama_goals,
+        m.teamb_goals,
+        m.went_to_penalties,
+        m.penalty_winner,
+        mp1.team,
+        CASE 
+          WHEN (mp1.team = 'A' AND m.teama_goals > m.teamb_goals) OR 
+               (mp1.team = 'B' AND m.teamb_goals > m.teama_goals) THEN 'G'
+          WHEN (mp1.team = 'A' AND m.teama_goals < m.teamb_goals) OR 
+               (mp1.team = 'B' AND m.teamb_goals < m.teama_goals) THEN 'P'
+          WHEN m.went_to_penalties = 1 THEN 'E'
+          ELSE 'E'
+        END as resultado
+      FROM matches m
+      JOIN match_players mp1 ON m.id = mp1.match_id
+      JOIN match_players mp2 ON m.id = mp2.match_id
+      WHERE mp1.user_id = ${user3.id} 
+        AND mp2.user_id = ${user4.id}
+        AND mp1.team = mp2.team
+        AND m.match_type = '2v2'
+      ORDER BY m.created_at DESC
+      LIMIT 5
+    `;
+      const matchDetails = [];
+
+      matchesRaw.forEach((match) => {
+        // Asumimos que user1 y user2 están en el mismo equipo (pareja 1)
+        // y user3 y user4 están en el mismo equipo (pareja 2)
+        const pair1Team = match.user1_team; // También debería ser igual a user2_team
+        const pair2Team = match.user3_team; // También debería ser igual a user4_team
+
+        // Goles para pareja 1
+        const gf1 =
+          pair1Team === "A"
+            ? Number(match.teama_goals)
+            : Number(match.teamb_goals);
+        const gc1 =
+          pair1Team === "A"
+            ? Number(match.teamb_goals)
+            : Number(match.teama_goals);
+
+        // Goles para pareja 2
+        const gf2 =
+          pair2Team === "A"
+            ? Number(match.teama_goals)
+            : Number(match.teamb_goals);
+        const gc2 =
+          pair2Team === "A"
+            ? Number(match.teamb_goals)
+            : Number(match.teama_goals);
+
+        // Actualizar estadísticas
+        statsPair1.goles_a_favor += gf1;
+        statsPair1.goles_en_contra += gc1;
+        statsPair2.goles_a_favor += gf2;
+        statsPair2.goles_en_contra += gc2;
+
+        if (gf1 > gc1) {
+          // Pareja 1 gana
+          statsPair1.partidos_ganados++;
+          statsPair2.partidos_perdidos++;
+        } else if (gf1 < gc1) {
+          // Pareja 2 gana
+          statsPair1.partidos_perdidos++;
+          statsPair2.partidos_ganados++;
+        } else {
+          // Empate
+          statsPair1.partidos_empatados++;
+          statsPair2.partidos_empatados++;
+
+          if (match.went_to_penalties) {
+            if (match.penalty_winner === pair1Team) {
+              statsPair1.ganados_por_penales++;
+              statsPair2.perdidos_por_penales++;
+            } else {
+              statsPair1.perdidos_por_penales++;
+              statsPair2.ganados_por_penales++;
+            }
+          }
+        }
+      });
+
+      // Calcular estadísticas finales
+      [statsPair1, statsPair2].forEach((stats) => {
+        stats.diferencia_goles = stats.goles_a_favor - stats.goles_en_contra;
+
+        if (stats.partidos_jugados > 0) {
+          stats.winrate = Number(
+            ((stats.partidos_ganados / stats.partidos_jugados) * 100).toFixed(2)
+          );
+          stats.winrate_with_penalties = Number(
+            (
+              ((stats.partidos_ganados + stats.ganados_por_penales) /
+                stats.partidos_jugados) *
+              100
+            ).toFixed(2)
+          );
+        }
+      });
+
+      return {
+        pareja1: {
+          nombre_pareja: `${user1.username} & ${user2.username}`,
+          elo: pair1Elo?.current_rating || 1200,
+          ultimos_5_partidos: last5MatchesPair1.map((match) => match.resultado),
+          estadisticas: statsPair1,
+        },
+        pareja2: {
+          nombre_pareja: `${user3.username} & ${user4.username}`,
+          elo: pair2Elo?.current_rating || 1200,
+          ultimos_5_partidos: last5MatchesPair2.map((match) => match.resultado),
+          estadisticas: statsPair2,
+        },
+      };
+    } catch (error) {
+      console.error("Error en getHeadToHead2v2:", error);
+      throw error;
     }
   }
 }

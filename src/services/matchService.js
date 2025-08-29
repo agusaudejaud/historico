@@ -1,6 +1,20 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
+// Función helper para verificar si dos arrays tienen los mismos jugadores (sin importar orden)
+function arraysContainSamePlayers(arr1, arr2) {
+  if (arr1.length !== arr2.length) return false;
 
+  const set1 = new Set(arr1);
+  const set2 = new Set(arr2);
+
+  if (set1.size !== set2.size) return false;
+
+  for (const playerId of set1) {
+    if (!set2.has(playerId)) return false;
+  }
+
+  return true;
+}
 class Match {
   static async create(data) {
     let {
@@ -227,7 +241,6 @@ class Match {
         where: whereConditions,
         include: {
           users: {
-            
             select: {
               username: true,
             },
@@ -235,7 +248,6 @@ class Match {
           match_players: {
             include: {
               users: {
-               
                 select: {
                   id: true,
                   username: true,
@@ -540,6 +552,560 @@ class Match {
       console.error("Error in getMatchesByPair2v2:", error);
       throw error;
     }
+  }
+
+  static async getHeadToHeadMatches1v1(
+    username1,
+    username2,
+    { page = 1, limit = 20 } = {}
+  ) {
+    try {
+      const offset = (page - 1) * limit;
+
+      // Verificar que los usuarios existan
+      const users = await prisma.users.findMany({
+        where: {
+          OR: [
+            { username: { equals: username1, mode: "insensitive" } },
+            { username: { equals: username2, mode: "insensitive" } },
+          ],
+        },
+      });
+
+      if (users.length !== 2) {
+        throw new Error("Uno o ambos usuarios no encontrados");
+      }
+
+      const user1 = users.find(
+        (u) => u.username.toLowerCase() === username1.toLowerCase()
+      );
+      const user2 = users.find(
+        (u) => u.username.toLowerCase() === username2.toLowerCase()
+      );
+
+      const player1Id = user1.id;
+      const player2Id = user2.id;
+
+      // Buscar todos los partidos 1v1 entre estos usuarios
+      const allMatches = await prisma.matches.findMany({
+        where: {
+          match_type: "1v1",
+          AND: [
+            {
+              match_players: {
+                some: { user_id: player1Id },
+              },
+            },
+            {
+              match_players: {
+                some: { user_id: player2Id },
+              },
+            },
+          ],
+        },
+        include: {
+          match_players: {
+            select: {
+              user_id: true,
+              team: true,
+            },
+          },
+        },
+        orderBy: { created_at: "desc" },
+      });
+
+      // Filtrar solo los que estén en equipos diferentes
+      const headToHeadMatches = allMatches.filter((match) => {
+        const player1Team = match.match_players.find(
+          (mp) => mp.user_id === player1Id
+        )?.team;
+        const player2Team = match.match_players.find(
+          (mp) => mp.user_id === player2Id
+        )?.team;
+        return player1Team !== player2Team;
+      });
+
+      const total = headToHeadMatches.length;
+      const paginatedMatchIds = headToHeadMatches
+        .slice(offset, offset + limit)
+        .map((match) => match.id);
+
+      if (paginatedMatchIds.length === 0) {
+        return {
+          total: 0,
+          page,
+          limit,
+          jugador1: user1.username,
+          jugador2: user2.username,
+          data: [],
+        };
+      }
+
+      // Obtener datos completos de los matches paginados
+      const matches = await prisma.matches.findMany({
+        where: {
+          id: { in: paginatedMatchIds },
+        },
+        include: {
+          users: {
+            select: {
+              id: true,
+              username: true,
+            },
+          },
+          match_players: {
+            include: {
+              users: {
+                select: {
+                  id: true,
+                  username: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          created_at: "desc",
+        },
+      });
+
+      // Obtener cambios de ELO
+      const eloChanges = await prisma.elo_history.findMany({
+        where: {
+          match_id: { in: paginatedMatchIds },
+          user_id: { in: [player1Id, player2Id] },
+          elo_type: "1v1",
+        },
+        select: {
+          match_id: true,
+          user_id: true,
+          rating_change: true,
+        },
+      });
+
+      const eloChangeMap = {};
+      eloChanges.forEach((elo) => {
+        if (!eloChangeMap[elo.match_id]) {
+          eloChangeMap[elo.match_id] = {};
+        }
+        eloChangeMap[elo.match_id][elo.user_id] = elo.rating_change;
+      });
+
+      // Formatear datos
+      const formattedData = matches.map((match) => {
+        const teamA = match.match_players
+          .filter((mp) => mp.team === "A")
+          .map((mp) => ({
+            id: mp.users.id,
+            username: mp.users.username,
+          }));
+
+        const teamB = match.match_players
+          .filter((mp) => mp.team === "B")
+          .map((mp) => ({
+            id: mp.users.id,
+            username: mp.users.username,
+          }));
+
+        let winner;
+        if (match.teama_goals > match.teamb_goals) {
+          winner = "Team A";
+        } else if (match.teamb_goals > match.teama_goals) {
+          winner = "Team B";
+        } else if (match.went_to_penalties) {
+          winner =
+            match.penalty_winner === "A" ? "Team A (pen)" : "Team B (pen)";
+        } else {
+          winner = "Empate";
+        }
+
+        return {
+          match_id: match.id,
+          created_by: match.users.username,
+          created_at: match.created_at,
+          match_type: match.match_type,
+          went_to_penalties: match.went_to_penalties,
+          penalty_winner: match.penalty_winner,
+          result: {
+            teamA_goals: match.teama_goals,
+            teamB_goals: match.teamb_goals,
+            winner,
+          },
+          teams: {
+            teamA,
+            teamB,
+          },
+          elo_changes: {
+            [user1.username]: eloChangeMap[match.id]?.[player1Id] || 0,
+            [user2.username]: eloChangeMap[match.id]?.[player2Id] || 0,
+          },
+        };
+      });
+
+      return {
+        total,
+        page,
+        limit,
+        jugador1: user1.username,
+        jugador2: user2.username,
+        data: formattedData,
+      };
+    } catch (error) {
+      console.error("Error en getHeadToHeadMatches1v1:", error);
+      throw error;
+    }
+  }
+  static async getHeadToHeadMatches2v2(
+    username1,
+    username2,
+    username3,
+    username4,
+    { page = 1, limit = 20 } = {}
+  ) {
+    try {
+      const offset = (page - 1) * limit;
+      const usernames = [username1, username2, username3, username4];
+      const uniqueUsernames = [
+        ...new Set(usernames.map((u) => u.toLowerCase())),
+      ];
+
+      if (uniqueUsernames.length !== 4) {
+        throw new Error("Los 4 usuarios deben ser únicos");
+      }
+
+      const users = await prisma.users.findMany({
+        where: {
+          OR: usernames.map((username) => ({
+            username: { equals: username, mode: "insensitive" },
+          })),
+        },
+      });
+
+      if (users.length !== 4) {
+        throw new Error("Uno o más usuarios no encontrados");
+      }
+
+      // Mapear usuarios
+      const userMap = {};
+      users.forEach((user) => {
+        userMap[user.username.toLowerCase()] = user;
+      });
+
+      const user1 = userMap[username1.toLowerCase()];
+      const user2 = userMap[username2.toLowerCase()];
+      const user3 = userMap[username3.toLowerCase()];
+      const user4 = userMap[username4.toLowerCase()];
+
+      // Buscar partidos donde estén las dos parejas
+      const allMatches = await prisma.matches.findMany({
+        where: {
+          match_type: "2v2",
+          AND: [
+            {
+              match_players: {
+                some: { user_id: user1.id },
+              },
+            },
+            {
+              match_players: {
+                some: { user_id: user2.id },
+              },
+            },
+            {
+              match_players: {
+                some: { user_id: user3.id },
+              },
+            },
+            {
+              match_players: {
+                some: { user_id: user4.id },
+              },
+            },
+          ],
+        },
+        include: {
+          match_players: {
+            select: {
+              user_id: true,
+              team: true,
+            },
+          },
+        },
+        orderBy: { created_at: "desc" },
+      });
+
+      // Filtrar partidos donde user1&user2 vs user3&user4
+      const headToHeadMatches = allMatches.filter((match) => {
+        const user1Team = match.match_players.find(
+          (mp) => mp.user_id === user1.id
+        )?.team;
+        const user2Team = match.match_players.find(
+          (mp) => mp.user_id === user2.id
+        )?.team;
+        const user3Team = match.match_players.find(
+          (mp) => mp.user_id === user3.id
+        )?.team;
+        const user4Team = match.match_players.find(
+          (mp) => mp.user_id === user4.id
+        )?.team;
+
+        return (
+          user1Team === user2Team &&
+          user3Team === user4Team &&
+          user1Team !== user3Team
+        );
+      });
+
+      const total = headToHeadMatches.length;
+      const paginatedMatchIds = headToHeadMatches
+        .slice(offset, offset + limit)
+        .map((match) => match.id);
+
+      if (paginatedMatchIds.length === 0) {
+        return {
+          total: 0,
+          page,
+          limit,
+          pareja1: `${user1.username} & ${user2.username}`,
+          pareja2: `${user3.username} & ${user4.username}`,
+          data: [],
+        };
+      }
+
+      // Obtener datos completos
+      const matches = await prisma.matches.findMany({
+        where: {
+          id: { in: paginatedMatchIds },
+        },
+        include: {
+          users: {
+            select: {
+              id: true,
+              username: true,
+            },
+          },
+          match_players: {
+            include: {
+              users: {
+                select: {
+                  id: true,
+                  username: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          created_at: "desc",
+        },
+      });
+
+      // Obtener cambios de ELO para parejas
+      const eloChanges = await prisma.elo_history.findMany({
+        where: {
+          match_id: { in: paginatedMatchIds },
+          elo_type: "pair",
+          OR: [
+            { user1_id: user1.id, user2_id: user2.id },
+            { user1_id: user2.id, user2_id: user1.id },
+            { user1_id: user3.id, user2_id: user4.id },
+            { user1_id: user4.id, user2_id: user3.id },
+          ],
+        },
+        select: {
+          match_id: true,
+          user1_id: true,
+          user2_id: true,
+          rating_change: true,
+        },
+      });
+
+      const eloChangeMap = {};
+      eloChanges.forEach((elo) => {
+        eloChangeMap[elo.match_id] = eloChangeMap[elo.match_id] || {};
+        const pairKey = `${elo.user1_id}-${elo.user2_id}`;
+        eloChangeMap[elo.match_id][pairKey] = elo.rating_change;
+      });
+
+      const formattedData = matches.map((match) => {
+        const teamA = match.match_players
+          .filter((mp) => mp.team === "A")
+          .map((mp) => ({
+            id: mp.users.id,
+            username: mp.users.username,
+          }));
+
+        const teamB = match.match_players
+          .filter((mp) => mp.team === "B")
+          .map((mp) => ({
+            id: mp.users.id,
+            username: mp.users.username,
+          }));
+
+        let winner;
+        if (match.teama_goals > match.teamb_goals) {
+          winner = "Team A";
+        } else if (match.teamb_goals > match.teama_goals) {
+          winner = "Team B";
+        } else if (match.went_to_penalties) {
+          winner =
+            match.penalty_winner === "A" ? "Team A (pen)" : "Team B (pen)";
+        } else {
+          winner = "Empate";
+        }
+
+        return {
+          match_id: match.id,
+          created_by: match.users.username,
+          created_at: match.created_at,
+          match_type: match.match_type,
+          went_to_penalties: match.went_to_penalties,
+          penalty_winner: match.penalty_winner,
+          result: {
+            teamA_goals: match.teama_goals,
+            teamB_goals: match.teamb_goals,
+            winner,
+          },
+          teams: {
+            teamA,
+            teamB,
+          },
+          elo_changes: {
+            [`${user1.username} & ${user2.username}`]:
+              eloChangeMap[match.id]?.[`${user1.id}-${user2.id}`] ||
+              eloChangeMap[match.id]?.[`${user2.id}-${user1.id}`] ||
+              0,
+            [`${user3.username} & ${user4.username}`]:
+              eloChangeMap[match.id]?.[`${user3.id}-${user4.id}`] ||
+              eloChangeMap[match.id]?.[`${user4.id}-${user3.id}`] ||
+              0,
+          },
+        };
+      });
+
+      return {
+        total,
+        page,
+        limit,
+        pareja1: `${user1.username} & ${user2.username}`,
+        pareja2: `${user3.username} & ${user4.username}`,
+        data: formattedData,
+      };
+    } catch (error) {
+      console.error("Error en getHeadToHeadMatches2v2:", error);
+      throw error;
+    }
+  }
+
+  // solo caso de emergencia
+  static async getById(matchId) {
+    const match = await prisma.matches.findUnique({
+      where: { id: matchId },
+      include: {
+        match_players: true,
+      },
+    });
+    if (!match) throw new Error("Partido no encontrado");
+
+    const teamA = match.match_players
+      .filter((mp) => mp.team === "A")
+      .map((mp) => mp.user_id);
+    const teamB = match.match_players
+      .filter((mp) => mp.team === "B")
+      .map((mp) => mp.user_id);
+
+    return {
+      id: match.id,
+      match_type: match.match_type,
+      teamA_goals: match.teama_goals,
+      teamB_goals: match.teamb_goals,
+      went_to_penalties: match.went_to_penalties,
+      penalty_winner: match.penalty_winner,
+      teamA_players: teamA,
+      teamB_players: teamB,
+      created_at: match.created_at,
+      created_by: match.created_by,
+    };
+  }
+
+  static async update(matchId, data) {
+    const fields = {};
+    if (typeof data.teamA_goals === "number")
+      fields.teama_goals = data.teamA_goals;
+    if (typeof data.teamB_goals === "number")
+      fields.teamb_goals = data.teamB_goals;
+    if (data.match_type && ["1v1", "2v2"].includes(data.match_type))
+      fields.match_type = data.match_type;
+
+    // 👇 Conversión importante
+    if (typeof data.went_to_penalties === "boolean") {
+      fields.went_to_penalties = data.went_to_penalties ? 1 : 0;
+    } else if (typeof data.went_to_penalties === "number") {
+      fields.went_to_penalties = data.went_to_penalties;
+    }
+
+    if (["A", "B", null, undefined].includes(data.penalty_winner)) {
+      fields.penalty_winner = data.penalty_winner ?? null;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.matches.update({
+        where: { id: matchId },
+        data: fields,
+      });
+
+      // 2) Si vinieron jugadores, reemplazarlos
+      const hasPlayers =
+        Array.isArray(data.teamA_players) || Array.isArray(data.teamB_players);
+      if (hasPlayers) {
+        const teamA = data.teamA_players ?? [];
+        const teamB = data.teamB_players ?? [];
+
+        // Validación simple según tipo
+        const mt =
+          fields.match_type ??
+          (
+            await tx.matches.findUnique({
+              where: { id: matchId },
+              select: { match_type: true },
+            })
+          ).match_type;
+        if (mt === "1v1") {
+          if (teamA.length !== 1 || teamB.length !== 1)
+            throw new Error("En 1v1 debe haber 1 jugador por equipo");
+        } else if (mt === "2v2") {
+          if (teamA.length !== 2 || teamB.length !== 2)
+            throw new Error("En 2v2 debe haber 2 jugadores por equipo");
+        }
+
+        await tx.match_players.deleteMany({ where: { match_id: matchId } });
+        const rows = [
+          ...teamA.map((uid) => ({
+            match_id: matchId,
+            user_id: uid,
+            team: "A",
+          })),
+          ...teamB.map((uid) => ({
+            match_id: matchId,
+            user_id: uid,
+            team: "B",
+          })),
+        ];
+        if (rows.length) await tx.match_players.createMany({ data: rows });
+      }
+    });
+
+    return matchId;
+  }
+
+  static async delete(matchId) {
+    await prisma.$transaction(async (tx) => {
+      // En caso de no usar cascade en DB, borramos a mano
+      await tx.elo_history.deleteMany({ where: { match_id: matchId } });
+      await tx.match_players.deleteMany({ where: { match_id: matchId } });
+      await tx.matches.delete({ where: { id: matchId } });
+    });
+    return matchId;
   }
 }
 

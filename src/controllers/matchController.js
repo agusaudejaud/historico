@@ -12,7 +12,7 @@ exports.createMatch = async (req, res) => {
     if (!matchData.teamA_players || !matchData.teamB_players) {
       return res.status(400).json({ error: "Faltan jugadores en los equipos" });
     }
-  
+
     // 1. Crear el match
     const matchId = await Match.create(matchData);
 
@@ -146,5 +146,222 @@ exports.getMatchesByPair2v2 = async (req, res) => {
   } catch (err) {
     console.error("Error getting matches by pair:", err);
     res.status(500).json({ error: "Internal error", details: err.message });
+  }
+};
+
+
+
+exports.getHeadToHeadMatches1v1 = async (req, res) => {
+  const { username1, username2 } = req.params;
+
+  if (!username1 || !username2 || username1 === username2) {
+    return res.status(400).json({ error: "Usernames inválidos o repetidos" });
+  }
+
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const result = await Match.getHeadToHeadMatches1v1(username1, username2, {
+      page,
+      limit,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    console.error("Error al obtener head-to-head matches 1v1:", err);
+    if (err.message === "Uno o ambos usuarios no encontrados") {
+      return res.status(404).json({ error: err.message });
+    }
+    res.status(500).json({
+      success: false,
+      error: "Error interno",
+      details: err.message,
+    });
+  }
+};
+
+// En matchController.js - Head-to-head matches 2v2
+exports.getHeadToHeadMatches2v2 = async (req, res) => {
+  const { username1, username2, username3, username4 } = req.params;
+  const usernames = [username1, username2, username3, username4];
+
+  // Validar que todos los usernames sean únicos
+  const uniqueUsernames = [...new Set(usernames)];
+  if (uniqueUsernames.length !== 4 || usernames.some(u => !u)) {
+    return res.status(400).json({ 
+      error: "Los 4 usuarios deben ser únicos y válidos" 
+    });
+  }
+
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const result = await Match.getHeadToHeadMatches2v2(
+      username1,
+      username2,
+      username3,
+      username4,
+      { page, limit }
+    );
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    console.error("Error al obtener head-to-head matches 2v2:", err);
+    if (err.message.includes("no encontrados") || err.message.includes("únicos")) {
+      return res.status(404).json({ error: err.message });
+    }
+    res.status(500).json({
+      success: false,
+      error: "Error interno",
+      details: err.message,
+    });
+  }
+};
+
+// solo caso de emergencia
+exports.getMatchById = async (req, res) => {
+  try {
+    const matchId = parseInt(req.params.id);
+    if (isNaN(matchId)) {
+      return res.status(400).json({ error: "ID de partido inválido" });
+    }
+
+    const match = await Match.getById(matchId);
+    res.json(match);
+  } catch (err) {
+    console.error("Error al obtener partido:", err);
+    if (err.message === "Partido no encontrado") {
+      return res.status(404).json({ error: err.message });
+    }
+    res
+      .status(500)
+      .json({ error: "Error al obtener el partido", details: err.message });
+  }
+};
+
+exports.updateMatch = async (req, res) => {
+  try {
+    const matchId = parseInt(req.params.id);
+    if (isNaN(matchId))
+      return res.status(400).json({ error: "ID de partido inválido" });
+
+    // 0) Partido actual (para saber quiénes estaban antes)
+    const existingMatch = await Match.getById(matchId);
+
+    // 🚫 Validar creador
+    if (existingMatch.created_by !== req.user.id) {
+      return res
+        .status(403)
+        .json({ error: "Solo el creador puede editar este partido" });
+    }
+
+    // 🚫 Validar tiempo (6 horas = 21600000 ms)
+    const maxTimeMs = 6 * 60 * 60 * 1000;
+    if (new Date() - new Date(existingMatch.created_at) > maxTimeMs) {
+      return res
+        .status(403)
+        .json({
+          error:
+            "El partido solo puede editarse dentro de las 6 horas de creado",
+        });
+    }
+
+    // Usuarios afectados: los que estaban, + (si vinieron) los nuevos
+    let affectedUsers = [
+      ...existingMatch.teamA_players,
+      ...existingMatch.teamB_players,
+    ];
+    if (
+      Array.isArray(req.body.teamA_players) ||
+      Array.isArray(req.body.teamB_players)
+    ) {
+      const newUsers = [
+        ...(req.body.teamA_players || []),
+        ...(req.body.teamB_players || []),
+      ];
+      affectedUsers = [...new Set([...affectedUsers, ...newUsers])];
+    }
+
+    // 1) Revertir ELO de este partido
+    try {
+      await ELO.revertMatchResult(matchId);
+    } catch (_) {}
+
+    // 2) Actualizar el partido
+    await Match.update(matchId, req.body);
+
+    // 3) Recalcular ESTE partido
+    try {
+      await ELO.processMatchResult(matchId);
+    } catch (_) {}
+
+    // 4) Recalcular partidos posteriores donde participen usuarios afectados
+    const eloTypes = ["global", "1v1", "2v2"];
+    for (const eloType of eloTypes) {
+      await ELO.recalculateSubsequentMatches(affectedUsers, eloType, matchId);
+    }
+
+    res.json({ message: "Partido actualizado y ELO recalculado", matchId });
+  } catch (err) {
+    console.error("Error al actualizar partido:", err);
+    const status = err.message === "Partido no encontrado" ? 404 : 500;
+    res
+      .status(status)
+      .json({ error: "Error al actualizar el partido", details: err.message });
+  }
+};
+
+exports.deleteMatch = async (req, res) => {
+  try {
+    const matchId = parseInt(req.params.id);
+    if (isNaN(matchId))
+      return res.status(400).json({ error: "ID de partido inválido" });
+
+    const existingMatch = await Match.getById(matchId);
+
+    // 🚫 Validar creador
+    if (existingMatch.created_by !== req.user.id) {
+      return res
+        .status(403)
+        .json({ error: "Solo el creador puede eliminar este partido" });
+    }
+
+    // 🚫 Validar tiempo
+    const maxTimeMs = 6 * 60 * 60 * 1000;
+    if (new Date() - new Date(existingMatch.created_at) > maxTimeMs) {
+      return res.status(403).json({
+        error:
+          "El partido solo puede eliminarse dentro de las 6 horas de creado",
+      });
+    }
+    const affectedUsers = [
+      ...existingMatch.teamA_players,
+      ...existingMatch.teamB_players,
+    ];
+
+    try {
+      await ELO.revertMatchResult(matchId);
+    } catch (_) {}
+    await Match.delete(matchId);
+
+    const eloTypes = ["global", "1v1", "2v2"];
+    for (const eloType of eloTypes) {
+      await ELO.recalculateSubsequentMatches(affectedUsers, eloType, matchId);
+    }
+
+    res.json({ message: "Partido eliminado y ELO recalculado", matchId });
+  } catch (err) {
+    const status = err.message === "Partido no encontrado" ? 404 : 500;
+    res
+      .status(status)
+      .json({ error: "Error al eliminar el partido", details: err.message });
   }
 };
