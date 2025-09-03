@@ -21,7 +21,7 @@ exports.getGlobalLeaderboard = async (req, res) => {
       total: leaderboard.total,
       page,
       limit,
-      type: eloType,
+      elo_type: eloType,
     });
   } catch (error) {
     console.error("Error getting global leaderboard:", error);
@@ -57,21 +57,36 @@ exports.getPairLeaderboard = async (req, res) => {
   }
 };
 
-// Obtener historial de ELO individual
 exports.getELOHistory = async (req, res) => {
   try {
     const { username } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const eloType = req.query.type || "global";
+    const { startDate, endDate } = req.query;
 
     if (!["global", "1v1", "2v2"].includes(eloType)) {
       return res.status(400).json({
+        success: false,
         error: "Tipo de ELO inválido. Usa: global, 1v1, o 2v2",
       });
     }
 
-    const history = await ELO.getELOHistory(username, eloType, { page, limit });
+    // Validación de fechas (opcional)
+    if ((startDate && !endDate) || (!startDate && endDate)) {
+      return res.status(400).json({
+        success: false,
+        error: "Si proporcionas fechas, debes incluir tanto startDate como endDate",
+      });
+    }
+
+    const dateFilter = startDate && endDate ? { startDate, endDate } : undefined;
+
+    const history = await ELO.getELOHistory(username, eloType, { 
+      page, 
+      limit,
+      dateFilter 
+    });
 
     res.json({
       success: true,
@@ -80,18 +95,20 @@ exports.getELOHistory = async (req, res) => {
   } catch (error) {
     console.error("Error getting ELO history:", error);
     res.status(500).json({
+      success: false,
       error: "Error al obtener el historial de ELO",
       details: error.message,
     });
   }
 };
 
-// Obtener historial de ELO de parejas
+// Controller para historial de parejas con fechas
 exports.getPairELOHistory = async (req, res) => {
   try {
     const { username1, username2 } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
+    const { startDate, endDate } = req.query;
 
     // Validación adicional
     if (!username1 || !username2) {
@@ -108,15 +125,25 @@ exports.getPairELOHistory = async (req, res) => {
       });
     }
 
+    // Validación de fechas (opcional)
+    if ((startDate && !endDate) || (!startDate && endDate)) {
+      return res.status(400).json({
+        success: false,
+        error: "Si proporcionas fechas, debes incluir tanto startDate como endDate",
+      });
+    }
+
+    const dateFilter = startDate && endDate ? { startDate, endDate } : undefined;
+
     const history = await ELO.getPairELOHistory(username1, username2, {
       page,
       limit,
+      dateFilter
     });
 
     // Respuesta mejorada
     res.json({
       success: true,
-
       ...history,
     });
   } catch (error) {
@@ -129,6 +156,7 @@ exports.getPairELOHistory = async (req, res) => {
     });
   }
 };
+
 
 /* Recalcular ELO completo (función de admin)
 exports.recalculateELO = async (req, res) => {
