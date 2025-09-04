@@ -13,7 +13,59 @@ class ELO {
     GOAL_BONUS_THRESHOLD: 3, // Diferencia de goles para bonus
     GOAL_BONUS: 5, // Puntos extra por goleada
   };
+  // Agregar este método a la clase ELO
+  static async getKFactor(userId, eloType, currentRating = null) {
+    try {
+      // Contar partidos jugados por este usuario en este tipo de ELO
+      const matchCount = await prisma.elo_history.count({
+        where: {
+          user_id: userId,
+          elo_type: eloType,
+        },
+      });
 
+      // Si es nuevo (menos de 10 partidos), usar K alto
+      if (matchCount < 10) {
+        return this.CONFIG.K_FACTOR_NEW; // 40
+      }
+
+      // Si tiene rating alto (>2000), usar K bajo para más estabilidad
+      if (currentRating && currentRating > 2000) {
+        return 24; // K factor reducido para ratings altos
+      }
+
+      // K factor normal para jugadores experimentados
+      return this.CONFIG.K_FACTOR; // 32
+    } catch (error) {
+      console.error("Error obteniendo K factor:", error);
+      return this.CONFIG.K_FACTOR; // Fallback al K normal
+    }
+  }
+
+  // Versión para parejas
+  static async getPairKFactor(user1Id, user2Id) {
+    try {
+      const matchCount = await prisma.elo_history.count({
+        where: {
+          OR: [
+            { user1_id: user1Id, user2_id: user2Id },
+            { user1_id: user2Id, user2_id: user1Id },
+          ],
+          elo_type: "pair",
+        },
+      });
+
+      // Si la pareja es nueva (menos de 10 partidos juntos)
+      if (matchCount < 10) {
+        return this.CONFIG.K_FACTOR_NEW; // 40
+      }
+
+      return this.CONFIG.K_FACTOR; // 32
+    } catch (error) {
+      console.error("Error obteniendo K factor para pareja:", error);
+      return this.CONFIG.K_FACTOR;
+    }
+  }
   // Obtener leaderboard global (modificado para paginación)
   static async getGlobalLeaderboard(limit = 50, eloType = "global", page = 1) {
     try {
@@ -98,14 +150,14 @@ class ELO {
           const matches = await prisma.elo_history.count({
             where: {
               user_id: item.user_id,
-              elo_type: eloType, 
+              elo_type: eloType, // Usar directamente el eloType sin mapeo
             },
           });
 
           const wins = await prisma.elo_history.count({
             where: {
               user_id: item.user_id,
-              elo_type: eloType, 
+              elo_type: eloType, // Usar directamente el eloType sin mapeo
               result: "win",
             },
           });
@@ -227,7 +279,7 @@ class ELO {
   static async getELOHistory(
     username,
     eloType = "global",
-    { page = 1, limit = 20, dateFilter = null } = {}
+    { page = 1, limit = 20 } = {}
   ) {
     try {
       const offset = (page - 1) * limit;
@@ -238,55 +290,25 @@ class ELO {
       });
 
       if (!user) {
-        return {
-          total: 0,
-          page,
-          limit,
-          data: [],
-          message: "Usuario no encontrado",
-        };
+        return { total: 0, page, limit, data: [] };
       }
 
-      // Construir condición WHERE base
-      const whereCondition = {
-        user_id: user.id,
-        elo_type: eloType,
-        user2_id: null,
-      };
-
-      // Agregar filtro de fechas si se proporciona
-      if (dateFilter) {
-        whereCondition.matches = {
-          created_at: {
-            gte: new Date(dateFilter.startDate),
-            lte: new Date(dateFilter.endDate),
-          },
-        };
-      }
-
-      // Contar total con filtros aplicados
+      // Usar directamente el eloType sin mapeo
       const total = await prisma.elo_history.count({
-        where: whereCondition,
+        where: {
+          user_id: user.id,
+          elo_type: eloType,
+          user2_id: null,
+        },
       });
 
-      if (total === 0) {
-        return {
-          total: 0,
-          page,
-          limit,
-          data: [],
-          username,
-          elo_type: eloType,
-          date_filter: dateFilter,
-          message: dateFilter
-            ? "No hay registros en el rango de fechas especificado"
-            : "No hay historial disponible",
-        };
-      }
-
-      // Obtener historial paginado con filtros
+      // Obtener historial paginado
       const historyData = await prisma.elo_history.findMany({
-        where: whereCondition,
+        where: {
+          user_id: user.id,
+          elo_type: eloType,
+          user2_id: null,
+        },
         include: {
           matches: {
             include: {
@@ -334,11 +356,9 @@ class ELO {
         limit,
         username,
         elo_type: eloType,
-        date_filter: dateFilter,
         data: cleanedData,
       };
     } catch (error) {
-      console.error("Error en getELOHistory:", error);
       throw error;
     }
   }
@@ -347,7 +367,7 @@ class ELO {
   static async getPairELOHistory(
     username1,
     username2,
-    { page = 1, limit = 20, dateFilter = null } = {}
+    { page = 1, limit = 20 } = {}
   ) {
     try {
       const offset = (page - 1) * limit;
@@ -374,7 +394,6 @@ class ELO {
           page,
           limit,
           data: [],
-          date_filter: dateFilter,
           message: "Uno o ambos usuarios no existen",
         };
       }
@@ -383,48 +402,26 @@ class ELO {
       const userId1 = user1.id;
       const userId2 = user2.id;
 
-      // Construir condición WHERE base
-      const whereCondition = {
-        OR: [
-          { user1_id: userId1, user2_id: userId2 },
-          { user1_id: userId2, user2_id: userId1 },
-        ],
-        elo_type: "pair",
-      };
-
-      // Agregar filtro de fechas si se proporciona
-      if (dateFilter) {
-        whereCondition.matches = {
-          created_at: {
-            gte: new Date(dateFilter.startDate),
-            lte: new Date(dateFilter.endDate),
-          },
-        };
-      }
-
-      // Contar total con filtros aplicados
+      // Contar total
       const total = await prisma.elo_history.count({
-        where: whereCondition,
+        where: {
+          OR: [
+            { user1_id: userId1, user2_id: userId2 },
+            { user1_id: userId2, user2_id: userId1 },
+          ],
+          elo_type: "pair",
+        },
       });
 
-      if (total === 0) {
-        return {
-          total: 0,
-          page,
-          limit,
-          data: [],
-          username1: user1.username,
-          username2: user2.username,
-          date_filter: dateFilter,
-          message: dateFilter
-            ? "No hay registros en el rango de fechas especificado"
-            : "Esta pareja no ha jugado juntos",
-        };
-      }
-
-      // Obtener historial paginado con filtros
+      // Obtener historial paginado
       const historyData = await prisma.elo_history.findMany({
-        where: whereCondition,
+        where: {
+          OR: [
+            { user1_id: userId1, user2_id: userId2 },
+            { user1_id: userId2, user2_id: userId1 },
+          ],
+          elo_type: "pair",
+        },
         include: {
           matches: {
             include: {
@@ -476,11 +473,9 @@ class ELO {
         limit,
         username1: user1.username,
         username2: user2.username,
-        date_filter: dateFilter,
         data: cleanedData,
       };
     } catch (error) {
-      console.error("Error en getPairELOHistory:", error);
       throw error;
     }
   }
@@ -610,7 +605,7 @@ class ELO {
     }
   }
 
-  // Método processSpecificELO
+  // Método processSpecificELO SIN mapeo
   static async processSpecificELO(matchData) {
     // ✅ Usar directamente el match_type sin mapeo
     const eloType = matchData.match_type; // "1v1" o "2v2"
@@ -699,7 +694,8 @@ class ELO {
       pairARating,
       pairBRating,
       result.teamA,
-      goalBonus.teamA
+      goalBonus.teamA,
+      matchData
     );
     await this.updatePairELO(
       pairB,
@@ -707,7 +703,8 @@ class ELO {
       pairBRating,
       pairARating,
       result.teamB,
-      goalBonus.teamB
+      goalBonus.teamB,
+      matchData
     );
   }
 
@@ -810,9 +807,9 @@ class ELO {
     currentRating,
     expectedScore,
     actualScore,
+    kFactor,
     goalBonus = 0
   ) {
-    const kFactor = this.CONFIG.K_FACTOR;
     const baseChange = kFactor * (actualScore - expectedScore);
     const change = Math.round(baseChange + goalBonus);
 
@@ -839,7 +836,7 @@ class ELO {
         where: {
           user_id_elo_type: {
             user_id: userId,
-            elo_type: eloType, // ✅ Sin mapeo
+            elo_type: eloType,
           },
         },
       });
@@ -847,7 +844,10 @@ class ELO {
       let currentRating =
         existingRating?.current_rating || this.CONFIG.DEFAULT_RATING;
 
-      // Calcular nuevo rating
+      // 🆕 OBTENER K FACTOR DINÁMICO
+      const kFactor = await this.getKFactor(userId, eloType, currentRating);
+
+      // Calcular nuevo rating con K dinámico
       const expectedScore = this.calculateExpectedScore(
         playerTeamRating,
         opponentTeamRating
@@ -856,6 +856,7 @@ class ELO {
         currentRating,
         expectedScore,
         actualScore,
+        kFactor, // 🆕 Pasar K dinámico
         goalBonus
       );
 
@@ -864,12 +865,16 @@ class ELO {
       let penaltyResultInt = 0;
 
       if (matchData.went_to_penalties) {
-        resultType = "draw";
         const playerTeam = matchData.teamA.some((p) => p.id === userId)
           ? "A"
           : "B";
+
         if (matchData.penalty_winner === playerTeam) {
+          resultType = "win";
           penaltyResultInt = 1;
+        } else {
+          resultType = "loss";
+          penaltyResultInt = -1;
         }
       } else {
         if (actualScore === 1) resultType = "win";
@@ -877,14 +882,13 @@ class ELO {
         else resultType = "draw";
       }
 
-      // ✅ Usar directamente eloType sin mapeo
       await prisma.$transaction(async (tx) => {
         // Actualizar o crear rating
         await tx.user_elo_ratings.upsert({
           where: {
             user_id_elo_type: {
               user_id: userId,
-              elo_type: eloType, // ✅ Sin mapeo
+              elo_type: eloType,
             },
           },
           update: {
@@ -893,7 +897,7 @@ class ELO {
           },
           create: {
             user_id: userId,
-            elo_type: eloType, // ✅ Sin mapeo
+            elo_type: eloType,
             current_rating: newRating,
             created_at: new Date(),
             last_updated: new Date(),
@@ -905,7 +909,7 @@ class ELO {
           data: {
             match_id: matchId,
             user_id: userId,
-            elo_type: eloType, // ✅ Sin mapeo - usar directamente
+            elo_type: eloType,
             rating_before: currentRating,
             rating_after: newRating,
             rating_change: change,
@@ -917,12 +921,19 @@ class ELO {
         });
       });
 
-      return { userId, newRating, change };
+      return {
+        userId,
+        newRating,
+        change,
+        kFactor, // 🆕 Devolver también el K usado
+        matchesPlayed: await prisma.elo_history.count({
+          where: { user_id: userId, elo_type: eloType },
+        }),
+      };
     } catch (error) {
       throw error;
     }
   }
-
   // Crear par ordenado para parejas
   static createPair(userId1, userId2) {
     return userId1 < userId2
@@ -933,16 +944,24 @@ class ELO {
   // Obtener rating de pareja
   static async getPairRating(user1Id, user2Id) {
     try {
-      const pairRating = await prisma.pair_elo_ratings.findFirst({
+      const pair = this.createPair(user1Id, user2Id);
+
+      const pairRating = await prisma.pair_elo_ratings.findUnique({
         where: {
-          OR: [
-            { user1_id: user1Id, user2_id: user2Id },
-            { user1_id: user2Id, user2_id: user1Id },
-          ],
+          user1_id_user2_id: {
+            user1_id: pair.user1_id,
+            user2_id: pair.user2_id,
+          },
         },
       });
 
-      return pairRating || { current_rating: this.CONFIG.DEFAULT_RATING };
+      return (
+        pairRating || {
+          current_rating: this.CONFIG.DEFAULT_RATING,
+          user1_id: pair.user1_id,
+          user2_id: pair.user2_id,
+        }
+      );
     } catch (error) {
       throw error;
     }
@@ -964,7 +983,9 @@ class ELO {
       const opponentCurrentRating =
         opponentRating.current_rating || this.CONFIG.DEFAULT_RATING;
 
-      // Calcular nuevo rating
+      // 🆕 OBTENER K FACTOR DINÁMICO PARA PAREJA
+      const kFactor = await this.getPairKFactor(pair.user1_id, pair.user2_id);
+
       const expectedScore = this.calculateExpectedScore(
         currentRating,
         opponentCurrentRating
@@ -973,32 +994,11 @@ class ELO {
         currentRating,
         expectedScore,
         actualScore,
+        kFactor, // 🆕 Usar K dinámico
         goalBonus
       );
 
-      // Determinar tipo de resultado y penales como entero
-      let resultType;
-      let penaltyResultInt = 0;
-
-      if (matchData.went_to_penalties) {
-        resultType = "draw";
-        const pairTeam = matchData.teamA.some(
-          (p) => p.id === pair.user1_id || p.id === pair.user2_id
-        )
-          ? "A"
-          : "B";
-        if (matchData.penalty_winner === pairTeam) {
-          penaltyResultInt = 1;
-        }
-      } else {
-        if (actualScore === 1) resultType = "win";
-        else if (actualScore === 0) resultType = "loss";
-        else resultType = "draw";
-      }
-
-      // Usar transacción
       await prisma.$transaction(async (tx) => {
-        // Actualizar o crear pareja
         await tx.pair_elo_ratings.upsert({
           where: {
             user1_id_user2_id: {
@@ -1006,10 +1006,7 @@ class ELO {
               user2_id: pair.user2_id,
             },
           },
-          update: {
-            current_rating: newRating,
-            last_updated: new Date(),
-          },
+          update: { current_rating: newRating, last_updated: new Date() },
           create: {
             user1_id: pair.user1_id,
             user2_id: pair.user2_id,
@@ -1019,7 +1016,28 @@ class ELO {
           },
         });
 
-        // Crear registro en historial
+        let resultType;
+        let penaltyResultInt = 0;
+
+        const teamAIds = new Set(matchData.teamA.map((p) => p.id));
+        const pairIsTeamA =
+          teamAIds.has(pair.user1_id) && teamAIds.has(pair.user2_id);
+        const pairTeam = pairIsTeamA ? "A" : "B";
+
+        if (matchData.went_to_penalties) {
+          if (matchData.penalty_winner === pairTeam) {
+            resultType = "win";
+            penaltyResultInt = 1;
+          } else {
+            resultType = "loss";
+            penaltyResultInt = -1;
+          }
+        } else {
+          if (actualScore === 1) resultType = "win";
+          else if (actualScore === 0) resultType = "loss";
+          else resultType = "draw";
+        }
+
         await tx.elo_history.create({
           data: {
             match_id: matchId,
@@ -1037,708 +1055,38 @@ class ELO {
         });
       });
 
-      return {
-        success: true,
-        newRating,
-        change,
-      };
+      return { pair, newRating, change, kFactor };
     } catch (error) {
       throw error;
     }
   }
 
-  //*********  ELO SMARTS  *********//
-
-  // Método para obtener el rating histórico de un jugador en una fecha específica
-  static async getPlayerRatingAtDate(userId, eloType, endDate) {
+  /*
+  static async recalculateAllELO() {
     try {
-      // Buscar el último registro de ELO antes o en la fecha especificada
-      const lastEloRecord = await prisma.elo_history.findFirst({
-        where: {
-          user_id: userId,
-          elo_type: eloType,
-          user2_id: null, // Solo ratings individuales
-          matches: {
-            created_at: {
-              lte: new Date(endDate),
-            },
-          },
-        },
-        include: {
-          matches: true,
-        },
-        orderBy: {
-          match_id: "desc", // El último match en el rango de fechas
-        },
+      // 1) limpiar historial y ratings
+      await prisma.$transaction(async (tx) => {
+        await tx.elo_history.deleteMany({});
+        await tx.user_elo_ratings.deleteMany({});
+        await tx.pair_elo_ratings.deleteMany({});
       });
 
-      // Si no hay historial en ese rango de fechas, devolver rating por defecto
-      if (!lastEloRecord) {
-        return this.CONFIG.DEFAULT_RATING;
-      }
-
-      return lastEloRecord.rating_after;
-    } catch (error) {
-      console.error("Error obteniendo rating histórico:", error);
-      return this.CONFIG.DEFAULT_RATING;
-    }
-  }
-
-  // Método corregido para obtener métricas de jugadores con rating histórico
-  static async getRecentPlayerMetrics(userId, eloType, { startDate, endDate }) {
-    try {
-      const whereCondition = {
-        match_players: { some: { user_id: userId } },
-        created_at: {
-          gte: new Date(startDate),
-          lte: new Date(endDate),
-        },
-      };
-
-      if (eloType === "1v1") whereCondition.match_type = "1v1";
-      if (eloType === "2v2") whereCondition.match_type = "2v2";
-
-      const recentMatches = await prisma.matches.findMany({
-        where: whereCondition,
-        include: {
-          match_players: { include: { users: true } },
-          elo_history: {
-            where: {
-              user_id: userId,
-              elo_type: eloType,
-              user2_id: null, // Solo individual
-            },
-          },
-        },
-        orderBy: { created_at: "desc" },
-      });
-
-      if (recentMatches.length === 0) {
-        return {
-          matches_count: 0,
-          winrate: 0,
-          activity_score: 0,
-          consistency: 0,
-          historical_rating: this.CONFIG.DEFAULT_RATING, // Rating histórico
-        };
-      }
-
-      // Obtener el rating que tenía al final del período
-      const historicalRating = await this.getPlayerRatingAtDate(
-        userId,
-        eloType,
-        endDate
-      );
-
-      // Winrate
-        const wins = recentMatches.filter((match) => {
-      const userTeam = match.match_players.find(
-        (mp) => mp.user_id === userId
-      )?.team;
-      
-      // Solo contar victorias que NO fueron por penales
-      const isWinner = 
-        (userTeam === "A" && match.teama_goals > match.teamb_goals && !match.went_to_penalties) ||
-        (userTeam === "B" && match.teamb_goals > match.teama_goals && !match.went_to_penalties);
-      
-      return isWinner;
-    }).length;
-      const winrate = (wins / recentMatches.length) * 100;
-
-      // Consistencia (desvío estándar de cambios de ELO)
-      const eloChanges = recentMatches
-        .map((match) => {
-          const eloHistory = match.elo_history.find(
-            (eh) => eh.user_id === userId
-          );
-          return eloHistory ? eloHistory.rating_change : null;
-        })
-        .filter((c) => c !== null && c !== 0);
-
-      let consistency = 50;
-      if (eloChanges.length > 1) {
-        const avg = eloChanges.reduce((a, b) => a + b, 0) / eloChanges.length;
-        const variance =
-          eloChanges.reduce((a, b) => a + Math.pow(b - avg, 2), 0) /
-          eloChanges.length;
-        const stdDev = Math.sqrt(variance);
-        consistency = Math.max(30, Math.min(100, 100 - stdDev * 2));
-      }
-
-      // Actividad (número de partidos en rango)
-      const activity_score = Math.min(100, (recentMatches.length / 20) * 100);
-
-      return {
-        matches_count: recentMatches.length,
-        winrate: Math.round(winrate),
-        activity_score: Math.round(activity_score),
-        consistency: Math.round(consistency),
-        historical_rating: historicalRating, // Rating que tenía en esa fecha
-      };
-    } catch (error) {
-      console.error("Error en getRecentPlayerMetrics:", error);
-      return {
-        matches_count: 0,
-        winrate: 0,
-        activity_score: 0,
-        consistency: 0,
-        historical_rating: this.CONFIG.DEFAULT_RATING,
-      };
-    }
-  }
-
-  // Método corregido para el Smart Leaderboard
-  static async getSmartLeaderboard(
-    limit = 50,
-    eloType = "global",
-    page = 1,
-    { startDate, endDate }
-  ) {
-    try {
-      const offset = (page - 1) * limit;
-
-      // En lugar de usar getGlobalLeaderboard, obtenemos jugadores que tuvieron actividad en el rango
-      const playersWithActivity = await prisma.elo_history.findMany({
-        where: {
-          elo_type: eloType,
-          user2_id: null, // Solo individual
-          matches: {
-            created_at: {
-              gte: new Date(startDate),
-              lte: new Date(endDate),
-            },
-          },
-        },
-        include: {
-          users_elo_history_user_idTousers: {
-            select: {
-              id: true,
-              username: true,
-            },
-          },
-          matches: true,
-        },
-        distinct: ["user_id"],
-      });
-
-      const playersWithRecentActivity = [];
-
-      for (const playerRecord of playersWithActivity) {
-        if (!playerRecord.users_elo_history_user_idTousers) continue;
-
-        const player = playerRecord.users_elo_history_user_idTousers;
-        const recentMetrics = await this.getRecentPlayerMetrics(
-          player.id,
-          eloType,
-          { startDate, endDate }
-        );
-
-        if (recentMetrics.matches_count > 0) {
-          // Contar matches totales para el winrate general (no solo del período)
-          const totalMatches = await prisma.elo_history.count({
-            where: {
-              user_id: player.id,
-              elo_type: eloType,
-              user2_id: null,
-            },
-          });
-
-          const totalWins = await prisma.elo_history.count({
-            where: {
-              user_id: player.id,
-              elo_type: eloType,
-              user2_id: null,
-              result: "win",
-            },
-          });
-
-          const overallWinrate =
-            totalMatches > 0
-              ? Math.round((totalWins / totalMatches) * 100 * 100) / 100
-              : 0;
-
-          playersWithRecentActivity.push({
-            player: {
-              id: player.id,
-              username: player.username,
-              current_rating: recentMetrics.historical_rating, // Usar rating histórico
-              matches_played: totalMatches,
-              winrate: overallWinrate,
-            },
-            recentMetrics,
-          });
-        }
-      }
-
-      // Calcular smart_score usando el rating histórico
-      const enhancedPlayers = playersWithRecentActivity.map(
-        ({ player, recentMetrics }) => {
-          const weights = {
-            rating: 0.35,
-            consistency: 0.2,
-            winrate: 0.35,
-            activity: 0.1,
-          };
-
-          const smart_score =
-            recentMetrics.historical_rating * weights.rating + // Usar rating histórico
-            recentMetrics.consistency * weights.consistency +
-            recentMetrics.winrate * weights.winrate +
-            recentMetrics.activity_score * weights.activity;
-
-          return {
-            ...player,
-            recent_metrics: recentMetrics,
-            smart_score: Math.round(smart_score),
-          };
-        }
-      );
-
-      const sortedPlayers = enhancedPlayers.sort(
-        (a, b) => b.smart_score - a.smart_score
-      );
-      const paginatedPlayers = sortedPlayers.slice(offset, offset + limit);
-
-      return {
-        data: paginatedPlayers,
-        total: playersWithRecentActivity.length,
-        page,
-        limit,
-        elo_type: eloType,
-        ranking_type: "smart",
-      };
-    } catch (error) {
-      console.error("Error en getSmartLeaderboard:", error);
-      throw error;
-    }
-  }
-
-  // Método similar para parejas - obtener rating histórico de pareja
-  static async getPairRatingAtDate(user1Id, user2Id, endDate) {
-    try {
-      const lastEloRecord = await prisma.elo_history.findFirst({
-        where: {
-          OR: [
-            { user1_id: user1Id, user2_id: user2Id },
-            { user1_id: user2Id, user2_id: user1Id },
-          ],
-          elo_type: "pair",
-          matches: {
-            created_at: {
-              lte: new Date(endDate),
-            },
-          },
-        },
-        include: {
-          matches: true,
-        },
-        orderBy: {
-          match_id: "desc",
-        },
-      });
-
-      if (!lastEloRecord) {
-        return this.CONFIG.DEFAULT_RATING;
-      }
-
-      return lastEloRecord.rating_after;
-    } catch (error) {
-      console.error("Error obteniendo rating histórico de pareja:", error);
-      return this.CONFIG.DEFAULT_RATING;
-    }
-  }
-
-  // Método corregido para métricas de parejas con rating histórico
-  static async getRecentPairMetrics(user1Id, user2Id, { startDate, endDate }) {
-    try {
-      const recentMatches = await prisma.matches.findMany({
-        where: {
-          match_type: "2v2",
-          created_at: {
-            gte: new Date(startDate),
-            lte: new Date(endDate),
-          },
-          AND: [
-            { match_players: { some: { user_id: user1Id } } },
-            { match_players: { some: { user_id: user2Id } } },
-          ],
-        },
-        include: {
-          match_players: { include: { users: true } },
-          elo_history: {
-            where: {
-              OR: [
-                { user1_id: user1Id, user2_id: user2Id },
-                { user1_id: user2Id, user2_id: user1Id },
-              ],
-            },
-          },
-        },
-        orderBy: { created_at: "desc" },
-      });
-
-      // Filtrar solo partidos donde jugaron en el mismo equipo
-      const validMatches = recentMatches.filter((match) => {
-        const t1 = match.match_players.find(
-          (mp) => mp.user_id === user1Id
-        )?.team;
-        const t2 = match.match_players.find(
-          (mp) => mp.user_id === user2Id
-        )?.team;
-        return t1 === t2;
-      });
-
-      if (validMatches.length === 0) {
-        return {
-          matches_count: 0,
-          winrate: 0,
-          activity_score: 0,
-          consistency: 50,
-          historical_rating: this.CONFIG.DEFAULT_RATING,
-        };
-      }
-
-      // Obtener rating histórico de la pareja
-      const historicalRating = await this.getPairRatingAtDate(
-        user1Id,
-        user2Id,
-        endDate
-      );
-
-      // Winrate
-       const wins = validMatches.filter((match) => {
-      const team = match.match_players.find(
-        (mp) => mp.user_id === user1Id
-      )?.team;
-      
-      // Solo contar victorias que NO fueron por penales
-      const isWinner = 
-        (team === "A" && match.teama_goals > match.teamb_goals && !match.went_to_penalties) ||
-        (team === "B" && match.teamb_goals > match.teama_goals && !match.went_to_penalties);
-      
-      return isWinner;
-    }).length;
-      const winrate = (wins / validMatches.length) * 100;
-
-      // Consistencia
-      const eloChanges = validMatches
-        .map((m) => m.elo_history[0]?.rating_change ?? null)
-        .filter((c) => c !== null && c !== 0);
-
-      let consistency = 50;
-      if (eloChanges.length > 1) {
-        const avg = eloChanges.reduce((a, b) => a + b, 0) / eloChanges.length;
-        const variance =
-          eloChanges.reduce((a, b) => a + Math.pow(b - avg, 2), 0) /
-          eloChanges.length;
-        const stdDev = Math.sqrt(variance);
-        consistency = Math.max(30, Math.min(100, 100 - stdDev * 2));
-      }
-
-      const activity_score = Math.min(100, (validMatches.length / 15) * 100);
-
-      return {
-        matches_count: validMatches.length,
-        winrate: Math.round(winrate),
-        activity_score: Math.round(activity_score),
-        consistency: Math.round(consistency),
-        historical_rating: historicalRating,
-      };
-    } catch (error) {
-      console.error("Error en getRecentPairMetrics:", error);
-      return {
-        matches_count: 0,
-        winrate: 0,
-        activity_score: 0,
-        consistency: 50,
-        historical_rating: this.CONFIG.DEFAULT_RATING,
-      };
-    }
-  }
-
-  // Método corregido para Smart Pair Leaderboard
-  static async getSmartPairLeaderboard(
-    limit = 50,
-    page = 1,
-    { startDate, endDate }
-  ) {
-    try {
-      const offset = (page - 1) * limit;
-
-      // Obtener parejas que tuvieron actividad en el rango de fechas
-      const pairsWithActivity = await prisma.elo_history.findMany({
-        where: {
-          elo_type: "pair",
-          user1_id: { not: null },
-          user2_id: { not: null },
-          matches: {
-            created_at: {
-              gte: new Date(startDate),
-              lte: new Date(endDate),
-            },
-          },
-        },
-        include: {
-          users_elo_history_user1_idTousers: {
-            select: {
-              username: true,
-            },
-          },
-          users_elo_history_user2_idTousers: {
-            select: {
-              username: true,
-            },
-          },
-          matches: true,
-        },
-        distinct: ["user1_id", "user2_id"],
-      });
-
-      const pairsWithRecentActivity = [];
-
-      for (const pairRecord of pairsWithActivity) {
-        if (
-          !pairRecord.users_elo_history_user1_idTousers ||
-          !pairRecord.users_elo_history_user2_idTousers
-        )
-          continue;
-
-        const recentMetrics = await this.getRecentPairMetrics(
-          pairRecord.user1_id,
-          pairRecord.user2_id,
-          { startDate, endDate }
-        );
-
-        if (recentMetrics.matches_count > 0) {
-          // Calcular matches totales para estadísticas generales
-          const totalMatches = await prisma.elo_history.count({
-            where: {
-              OR: [
-                {
-                  user1_id: pairRecord.user1_id,
-                  user2_id: pairRecord.user2_id,
-                },
-                {
-                  user1_id: pairRecord.user2_id,
-                  user2_id: pairRecord.user1_id,
-                },
-              ],
-              elo_type: "pair",
-            },
-          });
-
-          const totalWins = await prisma.elo_history.count({
-            where: {
-              OR: [
-                {
-                  user1_id: pairRecord.user1_id,
-                  user2_id: pairRecord.user2_id,
-                },
-                {
-                  user1_id: pairRecord.user2_id,
-                  user2_id: pairRecord.user1_id,
-                },
-              ],
-              elo_type: "pair",
-              result: "win",
-            },
-          });
-
-          const overallWinrate =
-            totalMatches > 0
-              ? Math.round((totalWins / totalMatches) * 100 * 100) / 100
-              : 0;
-
-          pairsWithRecentActivity.push({
-            pair: {
-              user1_username:
-                pairRecord.users_elo_history_user1_idTousers.username,
-              user2_username:
-                pairRecord.users_elo_history_user2_idTousers.username,
-              current_rating: recentMetrics.historical_rating, // Usar rating histórico
-              matches_played: totalMatches,
-              winrate: overallWinrate,
-            },
-            recentMetrics,
-          });
-        }
-      }
-
-      // Calcular smart_score usando rating histórico
-      const enhancedPairs = pairsWithRecentActivity.map(
-        ({ pair, recentMetrics }) => {
-          const weights = {
-            rating: 0.35,
-            consistency: 0.2,
-            winrate: 0.35,
-            activity: 0.1,
-          };
-
-          const smart_score =
-            recentMetrics.historical_rating * weights.rating + // Usar rating histórico
-            recentMetrics.consistency * weights.consistency +
-            recentMetrics.winrate * weights.winrate +
-            recentMetrics.activity_score * weights.activity;
-
-          return {
-            ...pair,
-            recent_metrics: recentMetrics,
-            smart_score: Math.round(smart_score),
-          };
-        }
-      );
-
-      const sortedPairs = enhancedPairs.sort(
-        (a, b) => b.smart_score - a.smart_score
-      );
-      const paginatedPairs = sortedPairs.slice(offset, offset + limit);
-
-      return {
-        data: paginatedPairs,
-        total: pairsWithRecentActivity.length,
-        page,
-        limit,
-        ranking_type: "smart_pairs",
-      };
-    } catch (error) {
-      console.error("Error en getSmartPairLeaderboard:", error);
-      throw error;
-    }
-  }
-
-  //  SOLO CASO DE EMERGENCIA
-
-  static async revertMatchResult(matchId) {
-    try {
-      console.log(`Revertiendo ELO para match ${matchId}...`);
-
-      // Obtener todo el historial de ELO para este partido
-      const eloHistory = await prisma.elo_history.findMany({
-        where: { match_id: matchId },
-      });
-
-      console.log(
-        `Encontradas ${eloHistory.length} entradas de ELO para revertir`
-      );
-
-      // Revertir cada entrada de ELO
-      for (const eloRecord of eloHistory) {
-        try {
-          if (
-            eloRecord.elo_type === "1v1" ||
-            eloRecord.elo_type === "2v2" ||
-            eloRecord.elo_type === "global"
-          ) {
-            // Revertir ELO individual
-            await prisma.user_elo_ratings.update({
-              where: {
-                user_id_elo_type: {
-                  user_id: eloRecord.user_id,
-                  elo_type: eloRecord.elo_type,
-                },
-              },
-              data: {
-                current_rating: eloRecord.rating_before,
-                last_updated: new Date(),
-              },
-            });
-            console.log(
-              `ELO individual revertido para usuario ${eloRecord.user_id}, tipo ${eloRecord.elo_type}`
-            );
-          } else if (eloRecord.elo_type === "pair") {
-            // Revertir ELO de pareja
-            const pairRating = await prisma.pair_elo_ratings.findFirst({
-              where: {
-                OR: [
-                  {
-                    user1_id: eloRecord.user1_id,
-                    user2_id: eloRecord.user2_id,
-                  },
-                  {
-                    user1_id: eloRecord.user2_id,
-                    user2_id: eloRecord.user1_id,
-                  },
-                ],
-              },
-            });
-
-            if (pairRating) {
-              await prisma.pair_elo_ratings.update({
-                where: { id: pairRating.id },
-                data: {
-                  current_rating: eloRecord.rating_before,
-                  last_updated: new Date(),
-                },
-              });
-              console.log(
-                `ELO de pareja revertido para ${eloRecord.user1_id}-${eloRecord.user2_id}`
-              );
-            }
-          }
-        } catch (error) {
-          console.error(`Error revirtiendo ELO record ${eloRecord.id}:`, error);
-          // Continuar con los demás registros
-        }
-      }
-
-      // Eliminar el historial de ELO de este partido
-      await prisma.elo_history.deleteMany({
-        where: { match_id: matchId },
-      });
-
-      console.log(`ELO revertido exitosamente para match ${matchId}`);
-      return { success: true, matchId };
-    } catch (error) {
-      console.error(`Error revirtiendo ELO para match ${matchId}:`, error);
-      throw error;
-    }
-  }
-
-  static async recalculateSubsequentMatches(userIds, eloType, afterMatchId) {
-    try {
-      console.log(
-        `Recalculando partidos posteriores para usuarios: ${userIds.join(
-          ", "
-        )}, tipo: ${eloType}`
-      );
-
-      // Obtener todos los partidos de estos usuarios después del match modificado
-      const subsequentMatches = await prisma.matches.findMany({
-        where: {
-          id: { gt: afterMatchId },
-          match_players: {
-            some: {
-              user_id: { in: userIds },
-            },
-          },
-        },
+      // 2) traer todos los partidos en orden consistente (fecha y, por si acaso, id)
+      const matches = await prisma.matches.findMany({
+        select: { id: true },
         orderBy: { id: "asc" },
-        include: {
-          match_players: true,
-        },
       });
 
-      console.log(
-        `Encontrados ${subsequentMatches.length} partidos posteriores para recalcular`
-      );
-
-      // Recalcular cada partido en orden cronológico
-      for (const match of subsequentMatches) {
-        try {
-          await this.revertMatchResult(match.id);
-          await this.processMatchResult(match.id);
-          console.log(`Recalculado partido ${match.id}`);
-        } catch (error) {
-          console.error(`Error recalculando partido ${match.id}:`, error);
-        }
+      // 3) reprocesar
+      for (const { id } of matches) {
+        await this.processMatchResult(id); // reutilizamos tu pipeline de cálculo
       }
 
-      return { recalculated: subsequentMatches.length };
-    } catch (error) {
-      console.error("Error en recalculateSubsequentMatches:", error);
-      throw error;
+      return { success: true, processed: matches.length };
+    } catch (err) {
+      throw err;
     }
-  }
+  }*/
 }
 
 module.exports = ELO;

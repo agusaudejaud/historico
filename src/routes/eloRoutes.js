@@ -21,4 +21,6 @@ router.get(
   eloController.getPairELOHistory
 );
 
+//router.get("/recalculate", eloController.recalculateAllELO);
+
 module.exports = router;

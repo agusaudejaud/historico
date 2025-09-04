@@ -76,16 +76,18 @@ exports.getELOHistory = async (req, res) => {
     if ((startDate && !endDate) || (!startDate && endDate)) {
       return res.status(400).json({
         success: false,
-        error: "Si proporcionas fechas, debes incluir tanto startDate como endDate",
+        error:
+          "Si proporcionas fechas, debes incluir tanto startDate como endDate",
       });
     }
 
-    const dateFilter = startDate && endDate ? { startDate, endDate } : undefined;
+    const dateFilter =
+      startDate && endDate ? { startDate, endDate } : undefined;
 
-    const history = await ELO.getELOHistory(username, eloType, { 
-      page, 
+    const history = await ELO.getELOHistory(username, eloType, {
+      page,
       limit,
-      dateFilter 
+      dateFilter,
     });
 
     res.json({
@@ -129,16 +131,18 @@ exports.getPairELOHistory = async (req, res) => {
     if ((startDate && !endDate) || (!startDate && endDate)) {
       return res.status(400).json({
         success: false,
-        error: "Si proporcionas fechas, debes incluir tanto startDate como endDate",
+        error:
+          "Si proporcionas fechas, debes incluir tanto startDate como endDate",
       });
     }
 
-    const dateFilter = startDate && endDate ? { startDate, endDate } : undefined;
+    const dateFilter =
+      startDate && endDate ? { startDate, endDate } : undefined;
 
     const history = await ELO.getPairELOHistory(username1, username2, {
       page,
       limit,
-      dateFilter
+      dateFilter,
     });
 
     // Respuesta mejorada
@@ -158,52 +162,14 @@ exports.getPairELOHistory = async (req, res) => {
 };
 
 
-/* Recalcular ELO completo (función de admin)
-exports.recalculateELO = async (req, res) => {
+ /*
+exports.recalculateAllELO = async (req, res) => {
   try {
-    console.log('Iniciando recálculo completo del sistema ELO...');
-    
-    const result = await ELO.recalculateAllELO();
-    
-    console.log('Recálculo completado exitosamente');
-    
-    res.json({
-      success: true,
-      message: 'Todo el sistema ELO ha sido recalculado desde cero',
-      data: result
-    });
+    const out = await ELO.recalculateAllELO();
+    res.json({ success: true, ...out });
   } catch (error) {
-    console.error('Error recalculating ELO:', error);
-    res.status(500).json({
-      error: 'Error al recalcular ELO',
-      details: error.message
-    });
+    console.error("Error recalculando ELO:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
-}; 
-
-// Procesar un match específico (función de admin)
-exports.processMatch = async (req, res) => {
-  try {
-    const { matchId } = req.params;
-    
-    if (!matchId) {
-      return res.status(400).json({
-        error: 'ID de partido requerido'
-      });
-    }
-
-    const result = await ELO.processMatchResult(parseInt(matchId));
-    
-    res.json({
-      success: true,
-      message: `Partido ${matchId} procesado correctamente`,
-      data: result
-    });
-  } catch (error) {
-    console.error('Error processing match:', error);
-    res.status(500).json({
-      error: 'Error al procesar el partido',
-      details: error.message
-    });
-  }
-}; */
+};
+*/

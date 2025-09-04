@@ -91,13 +91,18 @@ class Stats {
         } else if (gf < gc) {
           stats.partidos_perdidos++;
         } else {
-          stats.partidos_empatados++;
+          // EMPATE - Verificar si fue a penales
           if (match.went_to_penalties) {
             if (match.penalty_winner === team) {
               stats.ganados_por_penales++;
+              // NO sumar a partidos_empatados porque al final ganaron
             } else {
               stats.perdidos_por_penales++;
+              // NO sumar a partidos_empatados porque al final perdieron
             }
+          } else {
+            // Este sí es un empate real (no hubo penales)
+            stats.partidos_empatados++;
           }
         }
       });
@@ -225,7 +230,6 @@ class Stats {
         const gc = es_teamA
           ? Number(match.teamb_goals)
           : Number(match.teama_goals);
-
         grupos.forEach((st) => {
           st.partidos_jugados++;
           st.goles_a_favor += gf;
@@ -236,13 +240,18 @@ class Stats {
           } else if (gf < gc) {
             st.partidos_perdidos++;
           } else {
-            st.partidos_empatados++;
+            // EMPATE - Verificar si fue a penales
             if (match.went_to_penalties) {
               if (match.penalty_winner === match.player_team) {
                 st.ganados_por_penales++;
+                // NO sumar a partidos_empatados
               } else {
                 st.perdidos_por_penales++;
+                // NO sumar a partidos_empatados
               }
+            } else {
+              // Empate real (sin penales)
+              st.partidos_empatados++;
             }
           }
         });
@@ -518,26 +527,27 @@ class Stats {
         statsPlayer2.goles_en_contra += gc2;
 
         if (gf1 > gc1) {
-          // Jugador1 gana
           statsPlayer1.partidos_ganados++;
           statsPlayer2.partidos_perdidos++;
         } else if (gf1 < gc1) {
-          // Jugador2 gana
           statsPlayer1.partidos_perdidos++;
           statsPlayer2.partidos_ganados++;
         } else {
-          // Empate
-          statsPlayer1.partidos_empatados++;
-          statsPlayer2.partidos_empatados++;
-
+          // EMPATE - Verificar penales
           if (match.went_to_penalties) {
             if (match.penalty_winner === player1Team) {
               statsPlayer1.ganados_por_penales++;
               statsPlayer2.perdidos_por_penales++;
+              // NO sumar a partidos_empatados
             } else {
               statsPlayer1.perdidos_por_penales++;
               statsPlayer2.ganados_por_penales++;
+              // NO sumar a partidos_empatados
             }
+          } else {
+            // Empate real (sin penales)
+            statsPlayer1.partidos_empatados++;
+            statsPlayer2.partidos_empatados++;
           }
         }
       });
@@ -788,26 +798,27 @@ class Stats {
         statsPair2.goles_en_contra += gc2;
 
         if (gf1 > gc1) {
-          // Pareja 1 gana
           statsPair1.partidos_ganados++;
           statsPair2.partidos_perdidos++;
         } else if (gf1 < gc1) {
-          // Pareja 2 gana
           statsPair1.partidos_perdidos++;
           statsPair2.partidos_ganados++;
         } else {
-          // Empate
-          statsPair1.partidos_empatados++;
-          statsPair2.partidos_empatados++;
-
+          // EMPATE - Verificar penales
           if (match.went_to_penalties) {
             if (match.penalty_winner === pair1Team) {
               statsPair1.ganados_por_penales++;
               statsPair2.perdidos_por_penales++;
+              // NO sumar a partidos_empatados
             } else {
               statsPair1.perdidos_por_penales++;
               statsPair2.ganados_por_penales++;
+              // NO sumar a partidos_empatados
             }
+          } else {
+            // Empate real (sin penales)
+            statsPair1.partidos_empatados++;
+            statsPair2.partidos_empatados++;
           }
         }
       });

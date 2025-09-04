@@ -4,27 +4,22 @@ class LeaderboardController {
   // 🎯 Ranking inteligente
   static async getSmartLeaderboard(req, res) {
     try {
-      const {
-        limit = 50,
-        type = "global",
-        page = 1,
-        startDate,
-        endDate,
-      } = req.query;
+      const { limit = 50, type = "global", page = 1, min_matches } = req.query;
 
-      if (!startDate || !endDate) {
-        return res.status(400).json({
-          success: false,
-          error: "Debes proporcionar startDate y endDate en la query",
-        });
+      let leaderboard;
+      if (min_matches) {
+        leaderboard = await ELO.getActivePlayersLeaderboard(
+          parseInt(limit),
+          type,
+          parseInt(min_matches)
+        );
+      } else {
+        leaderboard = await ELO.getSmartLeaderboard(
+          parseInt(limit),
+          type,
+          parseInt(page)
+        );
       }
-
-      const leaderboard = await ELO.getSmartLeaderboard(
-        parseInt(limit),
-        type,
-        parseInt(page),
-        { startDate, endDate }
-      );
 
       res.json({
         success: true,
@@ -39,23 +34,22 @@ class LeaderboardController {
     }
   }
 
-  // 🎯 Ranking inteligente para parejas
   static async getSmartPairLeaderboard(req, res) {
     try {
-      const { limit = 50, page = 1, startDate, endDate } = req.query;
+      const { limit = 50, page = 1, min_matches } = req.query;
 
-      if (!startDate || !endDate) {
-        return res.status(400).json({
-          success: false,
-          error: "Debes proporcionar startDate y endDate en la query",
-        });
+      let leaderboard;
+      if (min_matches) {
+        leaderboard = await ELO.getActivePairsLeaderboard(
+          parseInt(limit),
+          parseInt(min_matches)
+        );
+      } else {
+        leaderboard = await ELO.getSmartPairLeaderboard(
+          parseInt(limit),
+          parseInt(page)
+        );
       }
-
-      const leaderboard = await ELO.getSmartPairLeaderboard(
-        parseInt(limit),
-        parseInt(page),
-        { startDate, endDate }
-      );
 
       res.json({
         success: true,

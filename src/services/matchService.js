@@ -1,20 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
-// Función helper para verificar si dos arrays tienen los mismos jugadores (sin importar orden)
-function arraysContainSamePlayers(arr1, arr2) {
-  if (arr1.length !== arr2.length) return false;
 
-  const set1 = new Set(arr1);
-  const set2 = new Set(arr2);
-
-  if (set1.size !== set2.size) return false;
-
-  for (const playerId of set1) {
-    if (!set2.has(playerId)) return false;
-  }
-
-  return true;
-}
 class Match {
   static async create(data) {
     let {
@@ -995,117 +981,6 @@ class Match {
       console.error("Error en getHeadToHeadMatches2v2:", error);
       throw error;
     }
-  }
-
-  // solo caso de emergencia
-  static async getById(matchId) {
-    const match = await prisma.matches.findUnique({
-      where: { id: matchId },
-      include: {
-        match_players: true,
-      },
-    });
-    if (!match) throw new Error("Partido no encontrado");
-
-    const teamA = match.match_players
-      .filter((mp) => mp.team === "A")
-      .map((mp) => mp.user_id);
-    const teamB = match.match_players
-      .filter((mp) => mp.team === "B")
-      .map((mp) => mp.user_id);
-
-    return {
-      id: match.id,
-      match_type: match.match_type,
-      teamA_goals: match.teama_goals,
-      teamB_goals: match.teamb_goals,
-      went_to_penalties: match.went_to_penalties,
-      penalty_winner: match.penalty_winner,
-      teamA_players: teamA,
-      teamB_players: teamB,
-      created_at: match.created_at,
-      created_by: match.created_by,
-    };
-  }
-
-  static async update(matchId, data) {
-    const fields = {};
-    if (typeof data.teamA_goals === "number")
-      fields.teama_goals = data.teamA_goals;
-    if (typeof data.teamB_goals === "number")
-      fields.teamb_goals = data.teamB_goals;
-    if (data.match_type && ["1v1", "2v2"].includes(data.match_type))
-      fields.match_type = data.match_type;
-
-    // 👇 Conversión importante
-    if (typeof data.went_to_penalties === "boolean") {
-      fields.went_to_penalties = data.went_to_penalties ? 1 : 0;
-    } else if (typeof data.went_to_penalties === "number") {
-      fields.went_to_penalties = data.went_to_penalties;
-    }
-
-    if (["A", "B", null, undefined].includes(data.penalty_winner)) {
-      fields.penalty_winner = data.penalty_winner ?? null;
-    }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.matches.update({
-        where: { id: matchId },
-        data: fields,
-      });
-
-      // 2) Si vinieron jugadores, reemplazarlos
-      const hasPlayers =
-        Array.isArray(data.teamA_players) || Array.isArray(data.teamB_players);
-      if (hasPlayers) {
-        const teamA = data.teamA_players ?? [];
-        const teamB = data.teamB_players ?? [];
-
-        // Validación simple según tipo
-        const mt =
-          fields.match_type ??
-          (
-            await tx.matches.findUnique({
-              where: { id: matchId },
-              select: { match_type: true },
-            })
-          ).match_type;
-        if (mt === "1v1") {
-          if (teamA.length !== 1 || teamB.length !== 1)
-            throw new Error("En 1v1 debe haber 1 jugador por equipo");
-        } else if (mt === "2v2") {
-          if (teamA.length !== 2 || teamB.length !== 2)
-            throw new Error("En 2v2 debe haber 2 jugadores por equipo");
-        }
-
-        await tx.match_players.deleteMany({ where: { match_id: matchId } });
-        const rows = [
-          ...teamA.map((uid) => ({
-            match_id: matchId,
-            user_id: uid,
-            team: "A",
-          })),
-          ...teamB.map((uid) => ({
-            match_id: matchId,
-            user_id: uid,
-            team: "B",
-          })),
-        ];
-        if (rows.length) await tx.match_players.createMany({ data: rows });
-      }
-    });
-
-    return matchId;
-  }
-
-  static async delete(matchId) {
-    await prisma.$transaction(async (tx) => {
-      // En caso de no usar cascade en DB, borramos a mano
-      await tx.elo_history.deleteMany({ where: { match_id: matchId } });
-      await tx.match_players.deleteMany({ where: { match_id: matchId } });
-      await tx.matches.delete({ where: { id: matchId } });
-    });
-    return matchId;
   }
 }
 

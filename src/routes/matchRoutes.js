@@ -41,18 +41,5 @@ router.get(
   authenticateToken,
   matchController.getHeadToHeadMatches2v2
 );
-// SOLO CASO DE EMERGENCIA
-// GET Obtener partido por ID
-router.get("/match/:id", authenticateToken, matchController.getMatchById);
 
-// PUT Actualizar partido
-router.put(
-  "/match/:id",
-  authenticateToken,
-  validateMatchCreation,
-  matchController.updateMatch
-);
-
-// DELETE Eliminar partido
-router.delete("/match/:id", authenticateToken, matchController.deleteMatch);
 module.exports = router;
